@@ -1,0 +1,4 @@
+.gateway/
+inbox/*
+!inbox/.gitkeep
+_originals/
