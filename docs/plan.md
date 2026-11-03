@@ -106,6 +106,27 @@ Checked on 2026-11-03 on the Android 16 emulator, with expo-file-system 58.0.13 
 - In a dev build, the LogBox warning banner sits over the bottom buttons and takes their taps. Tap the banner once to clear it before driving those buttons from adb.
 - A Windows checkout with `core.autocrlf=true` writes CRLF into `presets/` and the fixtures. Files pushed from it to the emulator differ from the repository's bytes.
 
+## What P3 found
+
+Checked on 2026-11-03 under jest and on the Android 16 emulator. The wiki on the emulator was one darami wrote from the en preset, and the Codex login came from P0.
+
+- The folder is the queue. Memo state and attempts come from file names and `log.md`, as in dotoriwiki. SQLite holds only the undo journal: what each touched path held before the job, and the exact `log.md` text the job meant to write. A job counts as committed when `log.md` starts with that text. Otherwise recovery restores every journaled path and writes `interrupted k/3 | app stopped mid-job`.
+- The model can write only `.md` files under `<domain>/wiki/` of its memo's domain. A write anywhere else stops the loop and fails the attempt with `scope`, and the in-scope writes are rolled back too. `index.md` and `log.md` answer an error and the run goes on. `_review.md` takes only appends. These checks ignore case, because Android's storage does.
+- `src/jobs/__tests__/replay.test.ts` runs the made-by-dotoriwiki scenario through the engine with a fake model. Its 37 files come out byte for byte as dotoriwiki wrote them.
+- `darami://fs-check` passed 33 of 33 cases on SAF, including the new `write`, `remove`, and `listTree`.
+- A typed memo sent through `darami://engine-check` was:
+  1. classified into `learning` at 0.99
+  2. filed on the first attempt as `pgvector HNSW index.md`, with all six frontmatter fields
+- That memo changed four files: its raw copy, the page, `index.md`, and `log.md`. The new ledger line is `## [2026-11-03] ingest | 1c89fe2e-… | new page | pgvector HNSW index.md`.
+- A force-stop two seconds into an ingest left no page behind. The next launch wrote `interrupted 1/3 | app stopped mid-job`, and attempt 2 committed.
+- Classify and ingest both run on `gpt-6-luna`, at low and medium effort. In the kill test, ingest marked a trip-planning memo in `journal` as `unchanged` with no page. Whether that is the model, the effort, or the preset's journal rules is not known yet.
+- Each turn runs with a 2-minute stall timer that resets on any stream chunk. Every turn resends the whole input, because reasoning items are not stored.
+- Left for later phases:
+  - an empty `inbox/<id>.md` left by a killed accept loses its text, so P4's compose should keep the memo until `accept` answers
+  - two declared domains that differ only in case are one folder on Android
+  - search reads every page through SAF
+  - journal rows of a folder that is no longer kept are never removed
+
 ## Shape
 
 ```
