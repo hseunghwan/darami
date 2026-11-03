@@ -9,7 +9,7 @@ import { useRef, useState } from 'react';
 import { Linking, ScrollView, Text, View } from 'react-native';
 import { completeDeviceLogin, requestDeviceCode, type DeviceCode } from '../codex/auth';
 import { runTurn, type FunctionTool, type InputItem, type TurnRequest } from '../codex/responses';
-import { clearTokens, credentials, loadTokens, saveTokens } from '../codex/session';
+import { credentials, loadTokens, logOut, saveTokens } from '../codex/session';
 import { jobsLoggedIn } from '../state';
 import { Card, Header, PrimaryButton, Screen, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
@@ -132,7 +132,7 @@ export default function CodexProbe() {
           <SmallButton label="Refresh" onPress={refresh} disabled={busy} />
           <SmallButton label="Classify" onPress={classify} disabled={busy} />
           <SmallButton label="Tool round trip" onPress={toolRoundTrip} disabled={busy} />
-          <SmallButton label="Log out" onPress={() => void clearTokens().then(() => say('logged out'))} disabled={busy} />
+          <SmallButton label="Log out" onPress={() => void logOut().then(() => say('logged out'))} disabled={busy} />
         </View>
         <Card>
           <Text selectable style={{ color: t.fg, fontFamily: 'monospace', fontSize: 12 }}>

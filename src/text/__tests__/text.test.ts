@@ -19,6 +19,8 @@ const ARGS: Record<string, unknown[][]> = {
   'network.photo': [[2, 'HTTP 500']],
   'onboarding.steps': [[1, 3]],
   'onboarding.found': [[1], [4]],
+  'login.waiting': [[DAY]],
+  'login.loggedIn': [['me@example.com', 'plus'], [null, null]],
   'folder.empty': [['wiki']],
   'folder.unfinished': [['wiki']],
   'folder.found': [[1], [3]],
