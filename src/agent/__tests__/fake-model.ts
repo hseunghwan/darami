@@ -58,9 +58,9 @@ export const turn = {
   cancelled: (): ModelTurn => ({ ok: false, problem: { kind: 'cancelled' } }),
 };
 
-/** Plays the turns in order, one per turn of an attempt; running out fails the test. */
-export const plays = (...turns: readonly Reply[]) => (_req: ModelRequest, n: number): Reply => {
+/** Plays the turns in order, one per turn of an attempt; a function runs when its turn comes. Running out fails the test. */
+export const plays = (...turns: readonly (Reply | (() => Reply))[]) => (_req: ModelRequest, n: number): Reply => {
   const t = turns[n - 1];
   if (!t) throw new Error(`the script has no turn ${n}`);
-  return t;
+  return typeof t === 'function' ? t() : t;
 };

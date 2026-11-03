@@ -1,13 +1,16 @@
 /** The fakes the engine tests share. Not a test file: testMatch takes *.test.ts only. */
 
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Fs } from '../../core/fs';
 import type { WikiPath } from '../../core/layout';
 import { presetFiles } from '../../core/presets';
 import type { DomainName, Locale } from '../../core/types';
 import { nodeFs } from '../../fs/node';
+import type { Model } from '../../agent/model';
+import { MODEL_PROFILES } from '../../agent/model';
+import { openEngine, type Engine, type EngineEvent } from '../engine';
 import type { JournalHead, JournalJob, JournalStore, Slot } from '../transaction';
 
 /** Thrown at a cut: stands for the process being killed there. The engine never catches it. */
@@ -95,7 +98,9 @@ export function faultyFs(root: string, cut: Cut | null): Fs & { changes(): numbe
     if (!cut || changes !== cut.at) return;
     if (cut.how === 'torn' && text !== null) {
       const bytes = Buffer.from(text, 'utf8');
-      writeFileSync(join(root, ...path.split('/')), bytes.subarray(0, Math.floor(bytes.length / 2)));
+      const at = join(root, ...path.split('/'));
+      mkdirSync(dirname(at), { recursive: true });
+      writeFileSync(at, bytes.subarray(0, Math.floor(bytes.length / 2)));
     }
     throw new Killed(`${what} ${path} (${changes}, ${cut.how})`);
   };
@@ -198,3 +203,10 @@ export async function everyKill(a: {
   }
   return seen;
 }
+
+/** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
+export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = []): Promise<Engine> =>
+  openEngine({ fs, journal: store, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
+
+export const NO_SIGNAL = new AbortController().signal;
+export const run = (e: Engine, d: string, withModel = true) => e.runNext(d as DomainName, { withModel, signal: NO_SIGNAL });

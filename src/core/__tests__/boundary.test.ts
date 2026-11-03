@@ -103,3 +103,10 @@ test('src/agent reaches files only through a Workspace: it imports no Fs, no fol
   const leaks = agent.flatMap((s) => s.imports.filter((i) => i.to !== null && banned(i.to)).map((i) => `${name(s.path)}: ${i.spec}`));
   assert.deepEqual(leaks, []);
 });
+
+test('only jobs/transaction.ts writes or removes a log.md', () => {
+  const engine = ['agent', 'jobs'].flatMap((d) => sources(join(SRC, d)));
+  assert.ok(engine.some((s) => name(s.path) === join('jobs', 'transaction.ts')), 'the scan sees the journal');
+  const writers = engine.filter((s) => /\.(write|remove)\(\s*paths\.log\(/.test(s.text) || /\.(write|remove)\(\s*log\b/.test(s.text)).map((s) => name(s.path));
+  assert.deepEqual(writers, [join('jobs', 'transaction.ts')]);
+});

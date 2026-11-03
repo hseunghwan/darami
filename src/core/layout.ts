@@ -94,7 +94,11 @@ const SERVER_FILES = ['index.md', 'log.md'];
 
 export function placeForJob(domain: DomainName, declared: readonly DomainName[], target: string): JobPlace {
   const path = resolvePath(paths.domain(domain), target);
-  if (path === null) return { kind: 'outside', path: null };
+  return path === null ? { kind: 'outside', path: null } : placeOf(domain, declared, path);
+}
+
+/** placeForJob for a path already resolved, such as one listTree returned. */
+export function placeOf(domain: DomainName, declared: readonly DomainName[], path: WikiPath): JobPlace {
   if (path === ROOT || path.split('/').some((s) => s.startsWith('.'))) return { kind: 'outside', path };
   const wiki = `${domain}/wiki/`;
   if (path.startsWith(wiki)) {
