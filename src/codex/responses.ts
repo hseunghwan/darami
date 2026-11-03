@@ -50,6 +50,8 @@ export type TurnRequest = {
   readonly schema?: { readonly name: string; readonly schema: Record<string, unknown> };
   readonly signal?: AbortSignal;
   readonly onText?: (delta: string) => void;
+  /** Each piece of the stream as it arrives, text or not: a function call's arguments stream with no text delta. */
+  readonly onChunk?: () => void;
 };
 
 export type Usage = { readonly inputTokens: number; readonly outputTokens: number };
@@ -247,6 +249,7 @@ export async function runTurn(fetchFn: Fetch, creds: Credentials, req: TurnReque
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        req.onChunk?.();
         parser.push(decoder.decode(value, { stream: true })).forEach(collector.accept);
       }
     } else {

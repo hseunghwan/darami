@@ -91,6 +91,16 @@ describe('runTurn', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('tells the caller of each piece of a streamed body as it arrives', async () => {
+    const pieces = [textSse.slice(0, 40), textSse.slice(40)].map((t) => new TextEncoder().encode(t));
+    const body = { getReader: () => ({ read: async () => (pieces.length ? { done: false, value: pieces.shift() } : { done: true, value: undefined }) }) };
+    const fetchFn = (async () => ({ status: 200, body, headers: { get: () => null } })) as unknown as Fetch;
+    let chunks = 0;
+    const r = await runTurn(fetchFn, { accessToken: 'a', accountId: 'b' }, { ...req, onChunk: () => void (chunks += 1) });
+    expect(r.ok).toBe(true);
+    expect(chunks).toBe(2);
+  });
+
   it('turns a thrown fetch into a network failure', async () => {
     const fetchFn = (async () => {
       throw new Error('offline');
