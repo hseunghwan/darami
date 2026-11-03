@@ -1,5 +1,5 @@
+import type { MemoFailure, Placement } from '../jobs/engine';
 import { copy } from '../text';
-import type { MemoFailureWire, MemoStateWire } from './wire';
 
 const SENTENCE: Partial<Record<string, string>> = copy.failure.sentence;
 
@@ -12,7 +12,7 @@ export function brokenLinkTarget(detail: string): string | null {
 export type FailureSentence = { text: string; link: string | null };
 
 /** `link` is the missing page name, shown highlighted inside the sentence. */
-export function failureSentence(f: Pick<MemoFailureWire, 'code' | 'detail'>): FailureSentence {
+export function failureSentence(f: Pick<MemoFailure, 'code' | 'detail'>): FailureSentence {
   if (f.code === 'broken-link') {
     const link = brokenLinkTarget(f.detail);
     return link ? { text: copy.failure.brokenLink(link), link } : { text: copy.failure.brokenLinkUnnamed, link: null };
@@ -21,9 +21,8 @@ export function failureSentence(f: Pick<MemoFailureWire, 'code' | 'detail'>): Fa
 }
 
 /** The attempts suffix: on a failed memo after the sentence, on a retrying memo in its progress step. */
-export function attemptsNote(state: MemoStateWire, f: MemoFailureWire | null): string | null {
-  if (!f) return null;
-  if (state === 'failed') return copy.failure.allBlocked(f.max);
-  if (state === 'routed' || state === 'running') return copy.failure.retrying(f.attempts + 1);
+export function attemptsNote(at: Placement): string | null {
+  if (at.state === 'failed') return copy.failure.allBlocked(at.failure.max);
+  if ((at.state === 'routed' || at.state === 'running') && at.retry) return copy.failure.retrying(at.retry.attempts + 1);
   return null;
 }

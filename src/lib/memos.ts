@@ -1,4 +1,6 @@
-import type { Placement } from '../jobs/engine';
+import type { Verdict } from '../core/ledger';
+import type { DomainName } from '../core/types';
+import type { Finished, Placement } from '../jobs/engine';
 import { copy } from '../text';
 import type { OutboxFile, OutboxRow } from './outbox';
 import { photoCount } from './photos';
@@ -20,9 +22,10 @@ export const STAGE: Record<Stage, { label: string; tone: Tone }> = {
   failed: { label: copy.stage.failed, tone: 'bad' },
 };
 
-/** The verdict in the phone's language. An older gateway sends no verdict_id, and text from before the gateway has a null one. */
-export const verdictText = (m: Pick<MemoListItemWire, 'verdict' | 'verdict_id'>): string | null =>
-  (m.verdict_id && copy.verdict[m.verdict_id]) || m.verdict;
+/** The engine's verdict in the phone's language, whatever language the wiki writes; text it never wrote comes back as written. */
+export const verdictText = (v: Verdict): string => (typeof v === 'string' ? copy.verdict[v] : v.unknown);
+
+const wireVerdict = (m: Pick<MemoListItemWire, 'verdict' | 'verdict_id'>): string | null => (m.verdict_id && copy.verdict[m.verdict_id]) || m.verdict;
 
 export type RecentMemo = {
   id: string;
@@ -47,7 +50,7 @@ function fromOutbox(row: OutboxRow, local: string[]): RecentMemo | null {
 }
 
 const fromServer = (m: MemoListItemWire): RecentMemo => ({
-  id: m.id, text: m.text, captured_at: m.captured_at, stage: m.state, domain: m.domain, first_page: m.first_page, verdict: verdictText(m), photos: m.photos ?? 0, local: [],
+  id: m.id, text: m.text, captured_at: m.captured_at, stage: m.state, domain: m.domain, first_page: m.first_page, verdict: wireVerdict(m), photos: m.photos ?? 0, local: [],
 });
 
 /** Outbox rows and GET /memos, deduped by id. The gateway's copy wins: it knows more than "not sent yet". */
@@ -92,6 +95,41 @@ export function dayLabel(d: Date, now: Date): string {
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
   if (sameDay(d, yesterday)) return copy.time.yesterday;
   return d.getFullYear() === now.getFullYear() ? monthDay(d) : copy.time.otherYear(d);
+}
+
+/** When a job finished: the clock on the day it happened, the date and clock before, and only the date where the ledger's day is all there is. */
+export function finishedText(f: Finished, now: Date): string {
+  if ('at' in f) {
+    const at = new Date(f.at);
+    return sameDay(at, now) ? clock12(at) : copy.time.dateTime(at);
+  }
+  const [y, m, d] = f.day.split('-').map(Number);
+  return y && m && d ? monthDay(new Date(y, m - 1, d)) : f.day;
+}
+
+/** What confirm or move answered, as the screens tell it. */
+export type Released =
+  | { readonly kind: 'released'; readonly domain: DomainName }
+  | { readonly kind: 'gone' }
+  /** It is no longer where the action needs it; `started`: filing began. */
+  | { readonly kind: 'moved-on'; readonly started: boolean }
+  | { readonly kind: 'no-domain' }
+  | { readonly kind: 'paused' }
+  | { readonly kind: 'failed'; readonly message: string };
+
+export function releasedText(r: Exclude<Released, { kind: 'released' }>, action: 'confirm' | 'move'): string {
+  switch (r.kind) {
+    case 'gone':
+      return copy.common.notFound;
+    case 'moved-on':
+      return action === 'confirm' ? copy.activity.stale : r.started ? copy.move.started : copy.move.wrongState;
+    case 'no-domain':
+      return copy.move.unknownDomain;
+    case 'paused':
+      return copy.move.paused;
+    case 'failed':
+      return action === 'confirm' ? copy.activity.confirmFailed : copy.move.failed;
+  }
 }
 
 /** The 메모 tab's row time: just now, the clock today, the date and clock before. */

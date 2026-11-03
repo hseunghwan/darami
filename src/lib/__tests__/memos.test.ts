@@ -1,4 +1,4 @@
-import { activityCounts, groupByDay, mergeRecent, recentTime } from '../memos';
+import { activityCounts, finishedText, groupByDay, mergeRecent, recentTime, releasedText } from '../memos';
 import { withIGa, withRo } from '../../text/ko';
 import type { OutboxRow } from '../outbox';
 import type { MemoListItemWire } from '../wire';
@@ -74,4 +74,18 @@ it('picks the Korean particle by the final consonant', () => {
   expect(withRo('미루기 아카이빙')).toBe('미루기 아카이빙으로');
   expect(withIGa('미루기 아카이빙')).toBe('미루기 아카이빙이');
   expect(withIGa('스터디')).toBe('스터디가');
+});
+
+it('tells a finish by its clock on the day, its date and clock later, and its date alone from the ledger', () => {
+  const now = new Date('2026-10-29T15:12:30+09:00');
+  expect(finishedText({ at: '2026-10-29T05:02:00.000Z' }, now)).toBe('오후 2:02');
+  expect(finishedText({ at: '2026-10-27T05:02:00.000Z' }, now)).toBe('10월 27일 오후 2:02');
+  expect(finishedText({ day: '2026-10-28' }, now)).toBe('10월 28일');
+});
+
+it('tells a confirm that came too late apart from a move that came too late', () => {
+  expect(releasedText({ kind: 'moved-on', started: true }, 'confirm')).toBe('이미 다른 상태가 됐어요.');
+  expect(releasedText({ kind: 'moved-on', started: true }, 'move')).toBe('이미 정리가 시작돼서 옮길 수 없어요.');
+  expect(releasedText({ kind: 'moved-on', started: false }, 'move')).toBe('지금 상태에서는 옮길 수 없어요.');
+  expect(releasedText({ kind: 'gone' }, 'move')).toBe('위키 폴더에 이 메모가 없어요.');
 });

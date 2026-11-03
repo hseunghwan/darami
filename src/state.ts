@@ -1,12 +1,12 @@
 import * as Crypto from 'expo-crypto';
 import * as Network from 'expo-network';
 import * as SecureStore from 'expo-secure-store';
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import type { MachineFacts } from './core/config';
 import { FolderUnreachable } from './core/fs';
 import { parseMemo } from './core/pages';
-import type { DomainName } from './core/types';
+import type { DomainName, MemoId } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { phoneModel } from './agent/codex';
 import { MODEL_PROFILES } from './agent/model';
@@ -20,11 +20,12 @@ import { createFlusher } from './lib/flusher';
 import { gateway, observeGateway } from './lib/gateway';
 import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
+import type { Released } from './lib/memos';
 import { flushOnce } from './lib/outbox';
 import { parseStoredPairing, type Pairing } from './lib/pairing';
 import { attachmentsOf, type DraftPhoto } from './lib/photos';
 import type { StatusResponse } from './lib/wire';
-import { openEngine, type Engine, type EngineEvent, type MemoBook } from './jobs/engine';
+import { openEngine, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type ReleaseResult } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
@@ -282,6 +283,72 @@ export async function fileMemo(c: Capture): Promise<Filed> {
     if (e instanceof FolderUnreachable) void recheckFolder();
     return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** `to`: the domain a move asked for, which a wiki without it answers as not found. */
+function releasedOf(r: ReleaseResult, to?: DomainName): Released {
+  switch (r.kind) {
+    case 'released':
+      return r;
+    case 'not-found':
+      return to !== undefined && app.folder?.state?.kind === 'wiki' && !app.folder.state.config.domains.has(to) ? { kind: 'no-domain' } : { kind: 'gone' };
+    case 'conflict':
+      return { kind: 'moved-on', started: r.at.state === 'routed' || r.at.state === 'running' || r.at.state === 'ingested' };
+    case 'paused':
+      return r;
+  }
+}
+
+/** The book shows what these change on its own, through the engine's writes. */
+async function release(act: (e: Engine) => Promise<ReleaseResult>, to?: DomainName): Promise<Released> {
+  try {
+    const engine = await usableEngine();
+    if (!engine) return { kind: 'gone' };
+    const r = await act(engine);
+    void runner.trigger();
+    return releasedOf(r, to);
+  } catch (e) {
+    return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export const confirmMemo = (id: MemoId): Promise<Released> => release((e) => e.confirm(id));
+export const moveMemo = (id: MemoId, to: DomainName): Promise<Released> => release((e) => e.move(id, to), to);
+
+export async function retryMemo(id: MemoId, domain: DomainName): Promise<'retrying' | 'not-failed'> {
+  const engine = await usableEngine().catch(() => null);
+  const r = engine ? await engine.retry(domain, id).catch(() => 'not-failed' as const) : 'not-failed';
+  void runner.trigger();
+  return r;
+}
+
+/** Pull to refresh: the folder checked again, every memo folder read again, then a pass. */
+export async function refreshMemos(): Promise<void> {
+  await recheckFolder();
+  const engine = await usableEngine().catch(() => null);
+  await engine?.book.refresh().catch(() => {});
+  void runner.trigger();
+}
+
+export type MemoDetailState = { readonly kind: 'loading' } | { readonly kind: 'missing' } | { readonly kind: 'shown'; readonly memo: MemoDetail };
+
+/** The memo's detail, read again each time its row in the book changes. */
+export function useMemoDetail(id: string): MemoDetailState {
+  const row = useApp((a) => a.book?.byId.get(id as MemoId));
+  const ready = useApp((a) => a.book?.ready ?? false);
+  const [state, setState] = useState<MemoDetailState>({ kind: 'loading' });
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const engine = await usableEngine().catch(() => null);
+      const memo = engine ? await engine.book.memo(id as MemoId).catch(() => null) : null;
+      if (!live) return;
+      if (memo) setState({ kind: 'shown', memo });
+      else if (ready || !engine) setState({ kind: 'missing' });
+    })();
+    return () => void (live = false);
+  }, [id, row, ready]);
+  return state;
 }
 
 const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale);
