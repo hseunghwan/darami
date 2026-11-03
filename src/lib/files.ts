@@ -1,10 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import { outboxName } from './photos';
 
-// Photo bytes live under files/outbox/: picked ones in pending/ until the memo is captured, then as
-// <memoId>-<n>.<ext> until the row leaves the outbox. CaptureActivity writes shared photos to pending/ too.
+// Picked and shared photos wait in files/outbox/pending/, a path plugins/with-capture-intents.js
+// hardcodes for CaptureActivity. Nothing files them until P6.
 
-const outboxDir = () => new Directory(Paths.document, 'outbox');
 export const pendingDir = () => new Directory(Paths.document, 'outbox', 'pending');
 
 function ensure(dir: Directory): Directory {
@@ -13,13 +11,6 @@ function ensure(dir: Directory): Directory {
 }
 
 export const pendingUri = (): string => ensure(pendingDir()).uri;
-
-/** Moves a pending photo to its outbox name. A rename within the files dir: no bytes are copied. */
-export async function adopt(uri: string, memoId: string, n: number): Promise<string> {
-  const file = new File(uri);
-  await file.move(new File(ensure(outboxDir()), outboxName(memoId, n, uri)));
-  return file.uri;
-}
 
 /** The camera's shot sits in the picker's cache, which the system may clear; keep our own copy. */
 export async function keepCameraShot(uri: string, name: string): Promise<string> {

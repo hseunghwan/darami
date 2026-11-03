@@ -1,22 +1,22 @@
 /**
  * Every sentence the app shows, by locale, picked once at startup from the phone's language.
  * ko is the shape: en must match it key for key, so a missing or extra key fails tsc, and
- * text.test.ts fails on any Hangul in en. Words the gateway sends (domain names, verdict text
- * from an older gateway, failure details) are shown as they come.
+ * text.test.ts fails on any Hangul in en. Words from the wiki folder (domain names, a verdict the
+ * engine never wrote, failure details) are shown as they come.
  */
 
-import type { MemoListItemWire } from '../lib/wire';
-import type { Stage } from '../lib/memos';
+import type { FailureCode as Code } from '../core/filing';
+import type { VerdictId } from '../core/ledger';
+import type { MemoState } from '../core/places';
 import { deviceTag } from './device';
 import { en } from './en';
 import { ko } from './ko';
 
-export type { Stage };
+export type { MemoState, VerdictId };
 export type Locale = 'ko' | 'en';
 export type Copy = typeof ko;
-export type VerdictId = NonNullable<MemoListItemWire['verdict_id']>;
-/** MemoFailureWire.code values the app words. Any other code gets failure.unknown. */
-export type FailureCode = 'llm' | 'scope' | 'input-modified' | 'append-only' | 'frontmatter' | 'type' | 'empty' | 'interrupted';
+/** The failure codes the app words. broken-link has a sentence of its own, and unknown gets failure.unknown. */
+export type FailureCode = Exclude<Code, 'broken-link' | 'unknown'>;
 
 export const COPY: { readonly [L in Locale]: Copy } = { ko, en };
 

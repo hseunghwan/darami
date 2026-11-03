@@ -1,6 +1,6 @@
 /**
- * Runs passes over a queue while the app is in the foreground: the outbox's until P4 deletes it,
- * and the job runner's. One pass at a time; a trigger during a pass queues exactly one more.
+ * Runs the job runner's passes while the app is in the foreground. One pass at a time; a trigger
+ * during a pass queues exactly one more.
  */
 
 export type FlushResult =
@@ -24,7 +24,7 @@ export type FlusherDeps = {
 export type Flusher = {
   /** Enqueue, foreground and network change all call this. Resolves when the queue is drained or the pass gave up. */
   trigger(): Promise<void>;
-  /** After re-pairing: clear the 401 pause and flush. */
+  /** After a pass answered paused, such as on a folder that did not answer: run again. */
   resume(): Promise<void>;
   /** Timers only run while the app is in the foreground, and leaving it aborts the pass in flight. */
   setForeground(foreground: boolean): void;
