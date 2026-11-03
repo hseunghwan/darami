@@ -20,7 +20,7 @@ import { afterLogin, afterNetwork, afterRoute, afterRun, modelAllowed, rotation,
 
 export type RunnerReport =
   | ({ readonly where: 'router' } & Exclude<RouteReport, { readonly kind: 'idle' }>)
-  | ({ readonly where: DomainName } & Exclude<RunReport, { readonly kind: 'idle' }>)
+  | ({ readonly where: 'domain'; readonly domain: DomainName } & Exclude<RunReport, { readonly kind: 'idle' }>)
   | { readonly where: 'runner'; readonly kind: 'unreachable' | 'error'; readonly message: string };
 
 export type Runner = {
@@ -71,7 +71,7 @@ export function createRunner(deps: RunnerDeps): Runner {
           const r = await engine.runNext(d, { withModel: modelAllowed(s, d, deps.now()), signal });
           s = afterRun(s, d, r, deps.now());
           if (r.kind === 'idle') continue;
-          deps.onReport({ where: d, ...r });
+          deps.onReport({ where: 'domain', domain: d, ...r });
           if (r.kind === 'cancelled' || r.kind === 'paused') return DRAINED;
           ran = true;
           break;
