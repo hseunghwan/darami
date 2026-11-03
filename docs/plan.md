@@ -37,6 +37,17 @@ Checked against `openai/codex` on GitHub and Expo SDK 58 on 2026-11-03.
 - **Folder access.** `Directory.pickDirectoryAsync()` in `expo-file-system` returns a SAF directory whose `File` and `Directory` objects read and write `content://` URIs.
 - **Streaming.** The app already reads a streamed response body with `getReader()` in `src/lib/gateway.ts`, so the Responses SSE stream needs no new dependency.
 
+## What P0 found
+
+Checked on 2026-11-03, from Node on the Mac and from the app on an Android 16 emulator.
+
+- The endpoint takes requests with `originator: darami`. Plain text, a strict `json_schema` answer, and a function call with its output sent back all work. The request carries `instructions` as a field. It needs `stream: true` and `store: false`.
+- The models are the ones the ChatGPT plan lists at `GET /backend-api/codex/models`. On a Plus plan that was `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, and the `gpt-5.6` family. Any other model gets a 400 saying it is not supported with a ChatGPT account.
+- Timings with `gpt-6-luna` on the phone: classify with low effort 3.3 s, a function call 1.5 s, the turn after its output 1.7 s.
+- Device-code login works on the phone. The code answer has `interval` as a string and `expires_at` as an ISO date. The refresh takes JSON and returns a new refresh token, which the app saves.
+- A bad token gets a 401 with a `detail` message. Rate limits were not hit, so their handling (`Retry-After`, then `resets_in_seconds`, then five minutes) is a guess until a real 429 is recorded.
+- Never test a refresh with the tokens of a logged-in Codex CLI. A refresh token works once, so the CLI's login would break.
+
 ## Shape
 
 ```
