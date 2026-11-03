@@ -1,8 +1,11 @@
 /**
  * The wiki engine on the phone: the one object that changes a wiki folder. dotoriwiki's WikiImpl
  * without git, the gateway, or the CLIs. Memo and job state is the folder and its ledgers, read
- * again by every call, so "after a restart" is just "the next call"; SQLite holds only the journal
- * a crash needs (transaction.ts).
+ * again by every call, so "after a restart" is just "the next call"; SQLite holds the journal a
+ * crash needs (transaction.ts) and the memo book's immutable facts (book.ts).
+ *
+ * The engine sees its Fs and JournalStore only through the book, so the screens' read model is
+ * fed by the engine's own reads and writes and never lists the folder on its own.
  *
  * Outside src/jobs only this file, runner.ts, and sqlite.ts are imported (boundary.test.ts).
  *
@@ -17,17 +20,22 @@ import { CONFIG_FILE, type ConfigParse, type ConfigProblem, type MachineFacts } 
 import { dayIn } from '../core/filing';
 import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
-import type { MemoSource, NewMemo, Problem, Routing } from '../core/pages';
+import type { NewMemo, Problem, Routing } from '../core/pages';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { readConfig } from '../core/wiki';
 import { LIMITS, type AgentLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
+import { openBook, type Book, type BookParts, type BookStore } from './book';
 import { domainJobs } from './domain';
 import { lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
+
+export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow } from './book';
+export type { Finished, Placement } from '../core/places';
+export type { FailureCode, MemoFailure } from '../core/filing';
 
 export type JobRef = { readonly kind: 'ingest' | 'file-answer'; readonly domain: DomainName; readonly id: string };
 
@@ -55,15 +63,6 @@ export type RunReport =
   | { readonly kind: 'cancelled'; readonly job: JobRef }
   | { readonly kind: 'paused' };
 
-export type HeldMemo = {
-  readonly id: MemoId;
-  readonly domain: DomainName;
-  readonly text: string;
-  readonly capturedAt: string;
-  readonly source: MemoSource;
-  readonly routing: Routing;
-};
-
 export type ReleaseResult =
   | { readonly kind: 'released'; readonly domain: DomainName }
   | { readonly kind: 'not-found' }
@@ -86,22 +85,23 @@ export type Engine = {
    * `withModel: false` runs only jobs that need no model.
    */
   runNext(domain: DomainName, opts: { readonly withModel: boolean; readonly signal: AbortSignal }): Promise<RunReport>;
-  /** Memos waiting in hold/, oldest first. Removes hold copies left by a confirm or move cut off after its copy. */
-  held(): Promise<readonly HeldMemo[]>;
   /** A held memo into its domain's raw/, byte for byte. */
   confirm(id: MemoId): Promise<ReleaseResult>;
   /** A held or gave-up memo into another domain, with routing `by: user`. Never an ingested one. */
   move(id: MemoId, to: DomainName): Promise<ReleaseResult>;
   /** A retry line for a gave-up ingest, unless the memo was moved on. */
   retry(domain: DomainName, id: MemoId): Promise<'retrying' | 'not-failed'>;
-  locate(id: MemoId): Promise<Located | 'inbox' | null>;
   /** Declared domains in config order, or null while dotoriwiki.yaml or a CLAUDE.md it needs is broken or missing. */
   domains(): Promise<readonly DomainName[] | null>;
+  /** The memos as the screens show them, kept by the engine's own reads and writes. */
+  readonly book: Book;
 };
 
 export type EngineDeps = {
   readonly fs: Fs;
   readonly journal: JournalStore;
+  /** sqliteBook(folder) on the phone, memoryBook() under jest. */
+  readonly book: BookStore;
   readonly model: Model;
   readonly machine: MachineFacts;
   readonly now: () => Date;
@@ -109,9 +109,10 @@ export type EngineDeps = {
   readonly onEvent?: (e: EngineEvent) => void;
 };
 
-/** What memos.ts and domain.ts share. */
+/** What memos.ts and domain.ts share. `fs` is the book's, so every read and write reaches the book. */
 export type Ctx = {
   readonly fs: Fs;
+  readonly book: BookParts;
   readonly model: Model;
   readonly now: () => Date;
   readonly limits: AgentLimits;
@@ -133,15 +134,21 @@ const NO_CONFIG: ConfigParse = { ok: false, problems: [{ key: CONFIG_FILE, probl
  * while the config is broken, and the next runNext of its domain settles it.
  */
 export async function openEngine(deps: EngineDeps): Promise<Engine> {
-  const config = async () => (await readConfig(deps.fs, deps.machine)) ?? NO_CONFIG;
+  const book = await openBook({ fs: deps.fs, journal: deps.journal, store: deps.book, now: deps.now });
+  const config = async () => {
+    const c = (await readConfig(book.fs, deps.machine)) ?? NO_CONFIG;
+    book.sawConfig(c);
+    return c;
+  };
   const words = async (): Promise<Words | null> => {
     const c = await config();
     return c.ok ? { locale: c.config.locale, today: dayIn(c.config.timeZone, deps.now()), t: textFor(c.config.locale) } : null;
   };
   const onEvent = deps.onEvent ?? (() => {});
-  const journal = openJournal({ fs: deps.fs, store: deps.journal, words, onRecovered: (r) => onEvent({ kind: 'recovered', ...r }) });
+  const journal = openJournal({ fs: book.fs, store: book.journal, words, onRecovered: (r) => onEvent({ kind: 'recovered', ...r }) });
   const ctx: Ctx = {
-    fs: deps.fs,
+    fs: book.fs,
+    book,
     model: deps.model,
     now: deps.now,
     limits: deps.limits ?? LIMITS,
@@ -159,15 +166,19 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
   return {
     accept: memos.accept,
     routeNext: memos.routeNext,
-    held: memos.held,
     confirm: memos.confirm,
     move: memos.move,
     retry: memos.retry,
-    locate: memos.locate,
     runNext: jobs.runNext,
     async domains() {
       const c = await config();
       return c.ok ? [...c.config.domains.keys()] : null;
+    },
+    book: {
+      current: book.current,
+      watch: book.watch,
+      memo: (id) => ctx.memoLane(() => book.detail(id)),
+      refresh: memos.refresh,
     },
   };
 }

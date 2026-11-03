@@ -1,17 +1,21 @@
 /**
- * The JournalStore on SQLite: lib/db.ts's expo-sqlite database on the phone, node:sqlite under jest,
- * the same SQL on both.
+ * The JournalStore and the BookStore on SQLite: lib/db.ts's expo-sqlite database on the phone,
+ * node:sqlite under jest, the same SQL on both.
  *
- * SQLite holds the journal and nothing else of the engine: memo state and attempts are the folder
- * and its ledgers, and pauses are timing. Each method is one statement, so each is atomic without a
- * transaction that another domain's write could land inside; end() relies on ON DELETE CASCADE.
- * Rows of a folder that is no longer kept stay until it is kept again.
+ * SQLite holds the journal and the memo book's facts that never change once written, and nothing
+ * else of the engine: memo state and attempts are the folder and its ledgers, and pauses are
+ * timing. Each method is one statement, so each is atomic without a transaction that another
+ * domain's write could land inside; end() relies on ON DELETE CASCADE. Rows of a folder that is no
+ * longer kept stay until it is kept again.
  */
 
+import type { CommittedPage } from '../core/filing';
 import { parseWikiPath, type WikiPath } from '../core/layout';
 import type { JobKind } from '../core/ledger';
+import { parseMemoId } from '../core/pages';
 import type { DomainName } from '../core/types';
 import { db as appDb } from '../lib/db';
+import { parseHeader, type BookStore, type CommitRecord, type MemoHeader } from './book';
 import type { JournalHead, JournalStore } from './transaction';
 
 /** What the store needs of a database: expo-sqlite's SQLiteDatabase has it. */
@@ -67,16 +71,21 @@ function headOf(r: HeadRow): JournalHead | null {
   return { domain: r.domain as DomainName, slot: r.slot, job, abandoning: r.abandoning === 1, intendedLog: r.intended_log };
 }
 
-export function sqliteJournal(folder: string, open: () => Promise<Sql> = appDb): JournalStore {
+/** The database with `schema` made, opened once and again after a failed open. */
+function opener(open: () => Promise<Sql>, schema: string): () => Promise<Sql> {
   let ready: Promise<Sql> | null = null;
-  const db = () => {
+  return () => {
     ready ??= open().then(async (d) => {
-      await d.execAsync(JOURNAL_SCHEMA);
+      await d.execAsync(schema);
       return d;
     });
     ready.catch(() => (ready = null));
     return ready;
   };
+}
+
+export function sqliteJournal(folder: string, open: () => Promise<Sql> = appDb): JournalStore {
+  const db = opener(open, JOURNAL_SCHEMA);
   const key = (domain: string, slot: string) => [folder, domain, slot] as const;
   return {
     async heads() {
@@ -111,6 +120,84 @@ export function sqliteJournal(folder: string, open: () => Promise<Sql> = appDb):
     },
     async end(domain, slot) {
       await (await db()).runAsync('DELETE FROM journal WHERE folder = ? AND domain = ? AND slot = ?', ...key(domain, slot));
+    },
+  };
+}
+
+const BOOK_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS memo_header (
+    folder TEXT NOT NULL,
+    id TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    tz TEXT NOT NULL,
+    source TEXT NOT NULL,
+    preview TEXT NOT NULL,
+    place TEXT,
+    photos INTEGER NOT NULL,
+    PRIMARY KEY (folder, id)
+  );
+  CREATE TABLE IF NOT EXISTS memo_commit (
+    folder TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    id TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    pages TEXT NOT NULL,
+    PRIMARY KEY (folder, domain, id)
+  );
+`;
+
+type HeaderRow = { id: string; captured_at: string; tz: string; source: string; preview: string; place: string | null; photos: number };
+type CommitRow = { domain: string; id: string; finished_at: string; pages: string };
+
+const CHANGES = new Set(['created', 'modified']);
+
+function pagesOf(json: string): readonly CommittedPage[] | null {
+  try {
+    const v: unknown = JSON.parse(json);
+    if (!Array.isArray(v)) return null;
+    const ok = v.every((p) => typeof p?.pathUnderWiki === 'string' && CHANGES.has(p?.change) && (p?.type === null || typeof p?.type === 'string'));
+    return ok ? v.map((p) => ({ pathUnderWiki: p.pathUnderWiki, change: p.change, type: p.type })) : null;
+  } catch {
+    return null;
+  }
+}
+
+function commitOf(r: CommitRow): CommitRecord | null {
+  const id = parseMemoId(r.id);
+  const pages = pagesOf(r.pages);
+  return id && pages ? { domain: r.domain as DomainName, id, at: r.finished_at, pages } : null;
+}
+
+/** Rows per INSERT, far below SQLite's limit on bound values. */
+const PER_INSERT = 50;
+
+export function sqliteBook(folder: string, open: () => Promise<Sql> = appDb): BookStore {
+  const db = opener(open, BOOK_SCHEMA);
+  return {
+    async load() {
+      const d = await db();
+      const headers = await d.getAllAsync<HeaderRow>('SELECT id, captured_at, tz, source, preview, place, photos FROM memo_header WHERE folder = ?', folder);
+      const commits = await d.getAllAsync<CommitRow>('SELECT domain, id, finished_at, pages FROM memo_commit WHERE folder = ?', folder);
+      return {
+        headers: headers.flatMap((r) => parseHeader({ ...r, capturedAt: r.captured_at }) ?? []),
+        commits: commits.flatMap((r) => commitOf(r) ?? []),
+      };
+    },
+    async putHeaders(headers: readonly MemoHeader[]) {
+      const d = await db();
+      for (let i = 0; i < headers.length; i += PER_INSERT) {
+        const batch = headers.slice(i, i + PER_INSERT);
+        await d.runAsync(
+          `INSERT OR IGNORE INTO memo_header (folder, id, captured_at, tz, source, preview, place, photos) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+          ...batch.flatMap((h) => [folder, h.id, h.capturedAt, h.tz, h.source, h.preview, h.place, h.photos]),
+        );
+      }
+    },
+    async putCommit(r) {
+      await (await db()).runAsync(
+        'INSERT OR REPLACE INTO memo_commit (folder, domain, id, finished_at, pages) VALUES (?, ?, ?, ?, ?)',
+        folder, r.domain, r.id, r.at, JSON.stringify(r.pages),
+      );
     },
   };
 }

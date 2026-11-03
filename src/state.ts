@@ -22,7 +22,7 @@ import { attachmentsOf, type DraftPhoto } from './lib/photos';
 import type { StatusResponse } from './lib/wire';
 import { openEngine, type AcceptResult, type Engine, type EngineEvent } from './jobs/engine';
 import { createRunner, type RunnerReport } from './jobs/runner';
-import { sqliteJournal } from './jobs/sqlite';
+import { sqliteBook, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
 
 export type ThemePref = 'system' | 'dark' | 'light';
@@ -166,6 +166,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
     const engine = openEngine({
       fs: safFs(folder.tree),
       journal: sqliteJournal(folder.tree.uri),
+      book: sqliteBook(folder.tree.uri),
       model: phoneModel,
       machine: MACHINE,
       now: () => new Date(),

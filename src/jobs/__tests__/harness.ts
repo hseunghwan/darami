@@ -10,6 +10,9 @@ import type { DomainName, Locale } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import type { Model } from '../../agent/model';
 import { MODEL_PROFILES } from '../../agent/model';
+import type { Located } from '../../core/places';
+import type { MemoId } from '../../core/types';
+import type { BookStore, CommitRecord, MemoBook, MemoHeader } from '../book';
 import { openEngine, type Engine, type EngineEvent } from '../engine';
 import type { JournalHead, JournalJob, JournalStore, Slot } from '../transaction';
 
@@ -80,6 +83,26 @@ export function memoryJournal(): JournalStore & { calls(): number; rows(): numbe
       change('end');
       rows.delete(key(d, s));
     },
+  };
+}
+
+/** The node adapter, counting each call by method and path. `reset()` starts the count again. */
+export function countingFs(inner: Fs): Fs & { calls(method: keyof Fs, match?: (path: string) => boolean): number; listed(): string[]; reset(): void } {
+  let log: [keyof Fs, string][] = [];
+  const counted = <K extends keyof Fs>(method: K) => ((path: WikiPath, ...rest: unknown[]) => {
+    log.push([method, path]);
+    return (inner[method] as (...a: unknown[]) => unknown)(path, ...rest);
+  }) as Fs[K];
+  return {
+    readText: counted('readText'),
+    list: counted('list'),
+    create: counted('create'),
+    write: counted('write'),
+    remove: counted('remove'),
+    listTree: counted('listTree'),
+    calls: (method, match = () => true) => log.filter(([m, p]) => m === method && match(p)).length,
+    listed: () => log.filter(([m]) => m === 'list').map(([, p]) => p).sort(),
+    reset: () => void (log = []),
   };
 }
 
@@ -204,9 +227,45 @@ export async function everyKill(a: {
   return seen;
 }
 
+/** The BookStore in memory. One object outlives a reopen, as the database does. */
+export function memoryBook(): BookStore {
+  const headers = new Map<string, MemoHeader>();
+  const commits = new Map<string, CommitRecord>();
+  return {
+    async load() {
+      return { headers: [...headers.values()], commits: [...commits.values()] };
+    },
+    async putHeaders(hs) {
+      for (const h of hs) if (!headers.has(h.id)) headers.set(h.id, h);
+    },
+    async putCommit(r) {
+      commits.set(`${r.domain}\0${r.id}`, r);
+    },
+  };
+}
+
 /** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
-export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = []): Promise<Engine> =>
-  openEngine({ fs, journal: store, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
+export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook()): Promise<Engine> =>
+  openEngine({ fs, journal: store, book, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
+
+/** The next book a watcher hears that `ok` accepts, or this one. Reading memo files the book has not seen needs a watcher. */
+export function bookWhere(e: Engine, ok: (b: MemoBook) => boolean): Promise<MemoBook> {
+  return new Promise((resolve) => {
+    if (ok(e.book.current())) return resolve(e.book.current());
+    const off = e.book.watch(() => {
+      if (!ok(e.book.current())) return;
+      off();
+      resolve(e.book.current());
+    });
+  });
+}
+
+/** Where the book puts a memo after reading the folder again, in locate()'s words. */
+export async function placed(e: Engine, id: string): Promise<Located | 'inbox' | null> {
+  await e.book.refresh();
+  const at = (await bookWhere(e, (b) => b.reading === 0)).byId.get(id as MemoId)?.at;
+  return !at ? null : at.state === 'inbox' ? 'inbox' : { domain: at.domain, state: at.state };
+}
 
 export const NO_SIGNAL = new AbortController().signal;
 export const run = (e: Engine, d: string, withModel = true) => e.runNext(d as DomainName, { withModel, signal: NO_SIGNAL });
