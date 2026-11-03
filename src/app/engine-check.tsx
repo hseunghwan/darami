@@ -1,8 +1,8 @@
 /**
  * darami://engine-check, dev builds only. Files a typed memo through the engine on the kept folder
- * and the Codex login, before P4 rewires compose, and logs every runner report and engine event to
- * console.log with an ENGINE prefix for logcat (ReactNativeJS). adb can type only ASCII, so the
- * link carries the memo percent-encoded:
+ * and the Codex login, and logs every runner report and engine event to console.log with an ENGINE
+ * prefix for logcat (ReactNativeJS). adb can type only ASCII, so the link carries the memo
+ * percent-encoded:
  *
  *   darami://engine-check?text=<UTF-8 %XX>&hint=<domain, optional>   files the memo once, then runs a pass
  *   darami://engine-check?run=1                                       runs a pass now
@@ -11,6 +11,7 @@
  * Opened with no parameters it only logs: the relaunch after a kill shows the recovery.
  */
 
+import * as Crypto from 'expo-crypto';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, TextInput } from 'react-native';
@@ -60,8 +61,9 @@ export default function EngineCheck() {
   };
 
   async function file(memo: string, domainHint: string | null) {
-    const { id, result } = await fileMemo({ text: memo, domainHint });
-    say(`accepted ${id} ${result.kind}${'detail' in result ? `: ${result.detail}` : ''}`);
+    const id = Crypto.randomUUID();
+    const r = await fileMemo({ id, text: memo, source: 'typed', domainHint, location: null });
+    say(`accepted ${id} ${r.kind}${'detail' in r ? `: ${r.detail}` : 'message' in r ? `: ${r.message}` : ''}`);
   }
 
   async function pass() {

@@ -1,11 +1,11 @@
 import { ScrollView, View } from 'react-native';
-import { useApp } from '../state';
+import { useDomains } from '../state';
 import { Chip } from './parts';
 import { copy } from '../text';
 
-/** Auto plus each domain. `null` is auto: the gateway's classifier decides. */
+/** Auto plus each domain of the kept wiki. `null` is auto: the classifier decides. */
 export function DomainChips({ value, onChange, wrap }: { value: string | null; onChange: (d: string | null) => void; wrap?: boolean }) {
-  const domains = useApp((a) => a.domains);
+  const domains = useDomains();
   const chips = [
     <Chip key="auto" label={copy.common.auto} on={value === null} onPress={() => onChange(null)} />,
     ...domains.map((d) => <Chip key={d} label={d} on={value === d} onPress={() => onChange(d)} />),
