@@ -279,7 +279,7 @@ export const FS_CASES: readonly FsCase[] = [
       await seed.file('스터디/wiki/RAG.md', 'r');
       await seed.file('스터디/wiki/인사이트/2026.md', 'i');
       await seed.file('스터디/wiki/answers/q.md', 'q');
-      await seed.file('스터디/wiki/주제/깊이/더 깊이/끝.md'.normalize('NFD'), 'd');
+      await seed.file(`스터디/wiki/${'주제/깊이/더 깊이/끝.md'.normalize('NFD')}`, 'd');
       await seed.file('스터디/wiki/photo.jpg', 'p');
       await seed.folder('스터디/wiki/비어 있음');
       same(await fs.listTree(at('스터디/wiki')), [
