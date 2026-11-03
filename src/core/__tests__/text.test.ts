@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { renderLine, type LedgerLine } from '../ledger';
 import { renderIndex } from '../pages';
+import { linksToFetch } from '../sources';
 import { textFor, type Text } from '../text';
 
 const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
@@ -26,6 +27,12 @@ function everything(t: Text): string[] {
   ];
 }
 
+/** What dotoriwiki 91f0aac's renderFeedMemo('Hacker News', item, 'America/Chicago', locale) wrote, for an item with a link, a discussion, four extra fields, and a summary with a link. */
+const FEED_MEMO = {
+  ko: '[Hacker News] T\n원문: https://a.example/post\n게시: 2026-10-29\n토론: https://news.ycombinator.com/item?id=1\nCVE: CVE-1\n점수: 312\n심각도: high\n패키지: npm/x\n\nsee https://c.example',
+  en: '[Hacker News] T\nLink: https://a.example/post\nPublished: 2026-10-29\nDiscussion: https://news.ycombinator.com/item?id=1\nCVE: CVE-1\nPoints: 312\nSeverity: high\nPackage: npm/x\n\nsee https://c.example',
+} as const;
+
 test('an English wiki gets no Korean from any template', () => {
   for (const s of everything(textFor('en'))) assert.doesNotMatch(s, HANGUL, s);
   const gaveUp: LedgerLine = { date: '2026-10-29', job: 'ingest', id: 'A', outcome: { kind: 'gave-up', attempt: 3, max: 3, reason: 'empty x.md: page has no body' } };
@@ -49,4 +56,17 @@ test('a Korean wiki keeps the rules it had, plus the verdict list the id enum ne
   const old = before('2026-10-29', ['concept', 'case']);
   assert.ok(now.startsWith(old), now);
   assert.equal(now.slice(old.length), ' 판정은 다음 값 중 하나다.\n  - `created`: 새 페이지\n  - `updated`: 기존 페이지 수정\n  - `conflict`: 기존 내용과 충돌\n  - `unchanged`: 정리할 거리 없음');
+});
+
+test('feed memos written in either locale are fetched by their link line in any wiki', () => {
+  for (const l of ['ko', 'en'] as const) {
+    const text = FEED_MEMO[l];
+    assert.deepEqual(linksToFetch(text, 'feed'), ['https://a.example/post'], l);
+    assert.deepEqual(linksToFetch(text, 'share'), ['https://a.example/post', 'https://c.example'], `${l}: the discussion line is skipped`);
+  }
+  assert.equal(FEED_MEMO.en.split('\n\n')[0], [
+    '[Hacker News] T', 'Link: https://a.example/post', 'Published: 2026-10-29', 'Discussion: https://news.ycombinator.com/item?id=1',
+    'CVE: CVE-1', 'Points: 312', 'Severity: high', 'Package: npm/x',
+  ].join('\n'));
+  assert.deepEqual(linksToFetch('look at this\nDiscussion: https://news.ycombinator.com/item?id=2\nhttps://d.example', 'typed'), ['https://d.example'], 'a typed memo skips a Discussion: line');
 });
