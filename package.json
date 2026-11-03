@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit",
     "test": "TZ=Asia/Seoul jest",
     "icons": "node --no-warnings scripts/icons.mjs",
+    "presets": "node --no-warnings scripts/presets.ts",
     "check:private": "node --no-warnings scripts/check-private.mjs"
   },
   "dependencies": {
