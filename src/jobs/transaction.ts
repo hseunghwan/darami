@@ -78,8 +78,6 @@ export type LineDraft = { readonly job: JobKind; readonly id: string; readonly o
 export type JobTx = {
   readonly domain: DomainName;
   readonly job: JournalJob;
-  /** The text at `path` as this job has left it. */
-  text(path: WikiPath): Promise<string | null>;
   write(path: WikiPath, text: string): Promise<void>;
   /** What the job changed under <d>/wiki/, index.md and log.md aside, from the journal: check()'s changes and contents. */
   changes(): { readonly changes: readonly Change[]; readonly contents: ReadonlyMap<string, string> };
@@ -242,7 +240,6 @@ export function openJournal(deps: JournalDeps): Journal {
       return {
         domain,
         job,
-        text: async (path) => mem.wrote.get(path) ?? fs.readText(path),
         write: (path, text) => put(mem, path, text),
         changes,
         async commit(verdict, index) {
