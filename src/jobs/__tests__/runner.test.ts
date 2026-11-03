@@ -4,7 +4,7 @@ import type { DomainName, MemoId } from '../../core/types';
 import type { Unavailable } from '../../agent/model';
 import type { Engine, JobRef, RouteReport, RunReport } from '../engine';
 import { createRunner, type RunnerReport } from '../runner';
-import { afterRun, rotation, START, wakeIn } from '../schedule';
+import { afterRun, rotation, START, wakeIn, type Schedule } from '../schedule';
 
 const [A, B] = ['스터디', '일상'] as DomainName[] as [DomainName, DomainName];
 const job = (d: DomainName): JobRef => ({ kind: 'ingest', domain: d, id: 'X' });
@@ -32,10 +32,17 @@ function scripted(routes: RouteReport[], runs: Partial<Record<DomainName, (RunRe
 }
 
 function runnerOn(engine: Engine | null, clock = { now: 0 }) {
-  const timers: number[] = [];
+  const timers: { ms: number; fire: () => void }[] = [];
   const reports: RunnerReport[] = [];
-  const runner = createRunner({ engine: async () => engine, setTimer: (ms) => (timers.push(ms), () => {}), now: () => clock.now, onReport: (r) => reports.push(r) });
-  return { runner, timers, reports, clock };
+  const settled: (Schedule['pause'])[] = [];
+  const runner: ReturnType<typeof createRunner> = createRunner({
+    engine: async () => engine,
+    setTimer: (ms, fire) => (timers.push({ ms, fire }), () => {}),
+    now: () => clock.now,
+    onReport: (r) => reports.push(r),
+    onSettled: () => settled.push(runner.schedule().pause),
+  });
+  return { runner, timers, reports, clock, settled, waits: () => timers.map((t) => t.ms) };
 }
 
 test('a pass routes the whole inbox first, then runs one job at a time across domains, routing again between jobs', async () => {
@@ -48,7 +55,7 @@ test('a pass routes the whole inbox first, then runs one job at a time across do
   const order = e.calls.map((c) => (c.what === 'route' ? 'route' : c.d));
   assert.deepEqual(order, ['route', 'route', 'route', A, 'route', B, 'route', A, 'route', B, A]);
   assert.deepEqual(h.reports.map((r) => `${r.where === 'domain' ? r.domain : r.where} ${r.kind}`), ['router routed', 'router held', `${A} committed`, `${B} committed`, `${A} committed`]);
-  assert.deepEqual(h.timers, []);
+  assert.deepEqual(h.waits(), []);
 });
 
 test('unavailable pauses every model job for as long as it says, while jobs with no model still run', async () => {
@@ -58,7 +65,7 @@ test('unavailable pauses every model job for as long as it says, while jobs with
   const runs = e.calls.filter((c): c is Extract<Call, { what: 'run' }> => c.what === 'run');
   assert.ok(runs.length > 0 && runs.every((c) => !c.withModel), 'no model while paused');
   assert.equal(e.calls.filter((c) => c.what === 'route').length, 1, 'the router waits too');
-  assert.deepEqual(h.timers, [300_000]);
+  assert.deepEqual(h.waits(), [300_000]);
   assert.deepEqual(h.runner.schedule().pause, { until: 300_000, cause: 'rate-limited' });
   h.clock.now = 300_000;
   await h.runner.trigger();
@@ -137,5 +144,31 @@ test('an unreachable folder pauses the runner until it is resumed', async () => 
 test('no kept folder, no pass', async () => {
   const h = runnerOn(null);
   await h.runner.trigger();
-  assert.deepEqual([h.reports, h.timers], [[], []]);
+  assert.deepEqual([h.reports, h.waits()], [[], []]);
+});
+
+test('a pause that runs out shows as over after the pass its timer wakes, with no report', async () => {
+  const e = scripted([{ kind: 'unavailable', unavailable: unavailable('network', 120_000) }], {});
+  const h = runnerOn(e.engine);
+  await h.runner.trigger();
+  assert.deepEqual(h.settled, [{ until: 120_000, cause: 'network' }]);
+  h.clock.now = 120_000;
+  h.timers[0]!.fire();
+  await h.runner.trigger();
+  assert.equal(h.settled.at(-1), null);
+  assert.equal(h.reports.length, 1, 'the idle pass reported nothing');
+});
+
+test('a login or the network back ends its pause for the app before the pass it starts', async () => {
+  for (const [cause, end] of [['login', 'loggedIn'], ['network', 'networkBack']] as const) {
+    const e = scripted([{ kind: 'unavailable', unavailable: unavailable(cause, 600_000) }], {});
+    const h = runnerOn(e.engine);
+    await h.runner.trigger();
+    const routes = e.calls.length;
+    h.settled.length = 0;
+    const pass = h.runner[end]();
+    assert.equal(h.settled[0], null, cause);
+    assert.equal(e.calls.length, routes, `${cause}: told before the pass ran`);
+    await pass;
+  }
 });
