@@ -3,18 +3,30 @@ import * as Network from 'expo-network';
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
+import type { MachineFacts } from './core/config';
+import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
+import { pickSafTree, safFs } from './fs/saf';
+import { parseSafTree, type SafTree } from './fs/saf-uri';
 import { buildMemoRequest, type CaptureInput } from './lib/capture';
 import { kv, outbox } from './lib/db';
 import { adopt, sweepPending } from './lib/files';
 import { createFlusher } from './lib/flusher';
 import { gateway, observeGateway } from './lib/gateway';
+import type { Candidate, Usable } from './lib/folder';
 import { flushOnce } from './lib/outbox';
 import { parseStoredPairing, type Pairing } from './lib/pairing';
 import { attachmentsOf, type DraftPhoto } from './lib/photos';
 import type { StatusResponse } from './lib/wire';
+import { locale } from './text';
 
 export type ThemePref = 'system' | 'dark' | 'light';
 export type Settings = { location: boolean; theme: ThemePref };
+
+export type Folder = {
+  readonly tree: SafTree;
+  /** null while it is being inspected. Never stored: derived from the folder each time. */
+  readonly state: FolderState | null;
+};
 
 export type App = {
   ready: boolean;
@@ -26,9 +38,11 @@ export type App = {
   /** A 401 paused the outbox; the user has to pair again. */
   authLost: boolean;
   settings: Settings;
+  /** The wiki folder the user kept. Its domains are its own; `domains` above stays the gateway's until P4. */
+  folder: Folder | null;
 };
 
-let app: App = { ready: false, pairing: null, domains: [], reachable: null, authLost: false, settings: { location: false, theme: 'system' } };
+let app: App = { ready: false, pairing: null, domains: [], reachable: null, authLost: false, settings: { location: false, theme: 'system' }, folder: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<App>): void {
@@ -104,6 +118,48 @@ export async function updateSettings(patch: Partial<Settings>): Promise<void> {
   await kv.set('settings', JSON.stringify(settings));
 }
 
+/** What model_profile names on the phone is P3's to settle, so every profile is unknown: a warning, not a problem. */
+const MACHINE: MachineFacts = { modelProfiles: new Set() };
+
+const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale);
+
+/** The picker, opened at the kept folder or Documents, and what it returned. null when cancelled. Keeps nothing. */
+export async function pickFolder(): Promise<Candidate | null> {
+  const p = await pickSafTree(app.folder?.tree ?? null);
+  if (p.kind === 'cancelled') return null;
+  if (p.kind === 'unsupported') return p;
+  return { kind: 'checked', tree: p.tree, state: await inspect(p.tree) };
+}
+
+/** Writes or finishes the preset (setUpWiki refuses any other folder) and answers the new state. Keeps nothing. */
+export function setUpFolder(tree: SafTree): Promise<FolderState> {
+  return setUpWiki(safFs(tree), { locale, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, machine: MACHINE });
+}
+
+export const checkFolder = inspect;
+
+/** Keeps the folder: kv holds only its URI. */
+export async function keepFolder(tree: SafTree, state: Usable): Promise<void> {
+  await kv.set('folder', tree.uri);
+  set({ folder: { tree, state } });
+}
+
+/**
+ * Inspects the kept folder again and shows what it found, unless another folder was kept meanwhile.
+ * An I/O error keeps what was shown; the next recheck tries again.
+ */
+export async function recheckFolder(): Promise<void> {
+  const kept = app.folder;
+  if (!kept) return;
+  const state = await inspect(kept.tree).catch(() => kept.state);
+  if (app.folder?.tree.uri === kept.tree.uri) set({ folder: { tree: kept.tree, state } });
+}
+
+function parseFolder(text: string | null): Folder | null {
+  const t = text ? parseSafTree(text) : null;
+  return t?.ok ? { tree: t.value, state: null } : null;
+}
+
 function parseDomains(text: string | null): string[] {
   try {
     const v: unknown = text ? JSON.parse(text) : [];
@@ -135,12 +191,14 @@ export function boot(): Promise<void> {
         if (reachable !== app.reachable) set({ reachable });
       },
     });
-    const [pairing, domains, settings] = await Promise.all([
+    const [pairing, domains, settings, folder] = await Promise.all([
       SecureStore.getItemAsync('pairing').then(parseStoredPairing),
       kv.get('domains').then(parseDomains),
       kv.get('settings').then(parseSettings),
+      kv.get('folder').then(parseFolder),
     ]);
-    set({ ready: true, pairing, domains, settings });
+    set({ ready: true, pairing, domains, settings, folder });
+    void recheckFolder();
     sweepPending();
 
     AppState.addEventListener('change', (s) => flusher.setForeground(s === 'active'));
