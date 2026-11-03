@@ -46,7 +46,7 @@ test('a pass routes the whole inbox first, then runs one job at a time across do
   await h.runner.trigger();
   const order = e.calls.map((c) => (c.what === 'route' ? 'route' : c.d));
   assert.deepEqual(order, ['route', 'route', 'route', A, 'route', B, 'route', A, 'route', B, A]);
-  assert.deepEqual(h.reports.map((r) => `${r.where} ${r.kind}`), ['router routed', 'router held', `${A} committed`, `${B} committed`, `${A} committed`]);
+  assert.deepEqual(h.reports.map((r) => `${r.where === 'domain' ? r.domain : r.where} ${r.kind}`), ['router routed', 'router held', `${A} committed`, `${B} committed`, `${A} committed`]);
   assert.deepEqual(h.timers, []);
 });
 
