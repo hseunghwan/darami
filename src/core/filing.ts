@@ -6,7 +6,7 @@
 
 import { renderDomainCatalog, renderPageTypes, type DomainConfig, type TimeZone, type WikiConfig } from './config';
 import { renderThird, type Failure, type JobKind, type NewOutcome } from './ledger';
-import { PAGE_FIELDS, roleOf, type Change, type Memo } from './pages';
+import { firstProblem, PAGE_FIELDS, pageMeta, roleOf, type Change, type Memo, type Problem } from './pages';
 import { describePhoto } from './photos';
 import type { Text } from './text';
 import type { DomainName, Locale } from './types';
@@ -19,6 +19,20 @@ export const CLASSIFY_TRIES = 2;
 
 /** The reason darami writes on an interrupted attempt. dotoriwiki wrote `gateway stopped mid-job`; the ledger word marks both as interrupted. */
 export const INTERRUPTED_REASON = 'app stopped mid-job';
+
+/** A gave-up line has no interrupted word, so its reason is all that says the app stopped. */
+const INTERRUPTED_REASONS: ReadonlySet<string> = new Set([INTERRUPTED_REASON, 'gateway stopped mid-job']);
+
+export type FailureCode = Problem['rule'] | 'interrupted' | 'unknown';
+
+/** Why a memo gave up, or why its earlier attempts failed while it waits for the next. dotoriwiki's MemoFailure. */
+export type MemoFailure = { readonly attempts: number; readonly max: number; readonly code: FailureCode; readonly detail: string };
+
+export function failureOf(f: Failure, attempts: number): MemoFailure {
+  const interrupted = (f.kind === 'attempt-failed' && f.interrupted) || INTERRUPTED_REASONS.has(f.reason);
+  const problem = interrupted ? null : firstProblem(f.reason);
+  return { attempts, max: f.max, code: interrupted ? 'interrupted' : (problem?.rule ?? 'unknown'), detail: problem?.detail ?? f.reason };
+}
 
 /** YYYY-MM-DD in the wiki's zone: the ledger's date, `updated`, the answer page's name. */
 export const dayIn = (tz: TimeZone, at: Date): string =>
@@ -70,6 +84,20 @@ export function appliedPages(domain: DomainName, changes: readonly Change[]): re
     .filter((c) => roleOf(c.path) === 'page' || roleOf(c.path) === 'answer');
   const sorted = (cs: typeof listed) => cs.map((c) => c.path).sort(byCodePoint);
   return [...sorted(listed.filter((c) => c.status !== 'added')), ...sorted(listed.filter((c) => c.status === 'added'))];
+}
+
+/** A page an ingest commit created or modified, under wiki/ with `.md`, with its type as the job wrote it. */
+export type CommittedPage = { readonly pathUnderWiki: string; readonly change: 'created' | 'modified'; readonly type: string | null };
+
+/** appliedPages' list in its order, so a commit's record and its ledger line name the same pages. `contents` is JobTx.changes().contents. */
+export function committedPages(domain: DomainName, changes: readonly Change[], contents: ReadonlyMap<string, string>): readonly CommittedPage[] {
+  const prefix = `${domain}/wiki/`;
+  const added = new Set(changes.filter((c) => c.status === 'added').map((c) => c.path));
+  return appliedPages(domain, changes).map((p) => ({
+    pathUnderWiki: p,
+    change: added.has(prefix + p) ? 'created' : 'modified',
+    type: pageMeta(p, contents.get(prefix + p) ?? '').type,
+  }));
 }
 
 /** The memo, an agent memo's project line, one line per photo: the classifier never sees pixels. */
