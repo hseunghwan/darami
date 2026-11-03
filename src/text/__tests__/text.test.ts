@@ -59,6 +59,8 @@ const ARGS: Record<string, unknown[][]> = {
   'chats.remove': [['RAG question']],
   'settings.unsent': [[1], [2]],
   'settings.rejected': [[1], [2]],
+  'settings.loginExpired': [['me@example.com'], [null]],
+  'settings.waiting': [[1], [3]],
 };
 
 /** Every entry as [path, kind], walking objects and arrays. */

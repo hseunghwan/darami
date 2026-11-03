@@ -1,15 +1,16 @@
-import { Redirect, Tabs } from 'expo-router';
+import { Redirect, Tabs, type Href } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/tabs';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { gate } from '../../lib/onboarding';
 import { useApp } from '../../state';
 import { Icon, type IconName } from '../../ui/icon';
 import { useTheme } from '../../ui/theme';
 import { copy } from '../../text';
 
+/** The chat tab comes back with P5, on the local engine. */
 const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: copy.tabs.index, icon: 'pencil' },
-  chat: { label: copy.tabs.chat, icon: 'chat' },
   activity: { label: copy.tabs.activity, icon: 'history' },
 };
 
@@ -27,6 +28,7 @@ function BottomNav({ state, navigateToTab }: BottomTabBarProps) {
           <Pressable
             key={route.key}
             accessibilityRole="tab"
+            accessibilityLabel={tab.label}
             accessibilityState={{ selected: on }}
             onPress={() => navigateToTab(route.key)}
             style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 }}
@@ -41,12 +43,11 @@ function BottomNav({ state, navigateToTab }: BottomTabBarProps) {
 }
 
 export default function TabsLayout() {
-  const paired = useApp((a) => a.pairing !== null);
-  if (!paired) return <Redirect href="/onboarding" />;
+  const to = useApp((a) => gate(a.login, a.folder !== null));
+  if (to) return <Redirect href={to as Href} />;
   return (
     <Tabs tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="chat" />
       <Tabs.Screen name="activity" />
     </Tabs>
   );
