@@ -15,6 +15,10 @@
  *
  * A list or read that began before a write to the same folder or ledger ended is dropped, so a
  * stale snapshot never undoes the engine's own write.
+ *
+ * The book is also the runner's snapshot. Inside one pass, a memo folder listed whole or a ledger
+ * read whole is answered from the book, which the engine's own writes keep exact, so an idle pass
+ * lists each memo folder once instead of once per domain's job.
  */
 
 import type { ConfigParse } from '../core/config';
@@ -119,6 +123,9 @@ export function parseHeader(v: { id: unknown; capturedAt: unknown; tz: unknown; 
   return { id, capturedAt: v.capturedAt, tz: v.tz, source, preview: v.preview, place: typeof v.place === 'string' ? v.place : null, photos: v.photos };
 }
 
+/** One runner pass. Folders and ledgers read whole in it are not read again in it. */
+export type Pass = { readonly id: number };
+
 /** What engine.ts wires. Nothing else builds a book. */
 export type BookParts = Pick<Book, 'current' | 'watch'> & {
   /** The engine's Fs from here on. */
@@ -133,6 +140,9 @@ export type BookParts = Pick<Book, 'current' | 'watch'> & {
   located(id: MemoId): Located | 'inbox' | null;
   /** Outside any lane: engine.ts runs it in the memo lane. */
   detail(id: MemoId): Promise<MemoDetail | null>;
+  pass(): Pass;
+  /** The book's Fs, except that a memo folder listed whole or a ledger read whole during `pass` is answered from the book. An outside edit shows in the next pass. */
+  passFs(pass: Pass): Fs;
 };
 
 export type BookDeps = {
@@ -189,6 +199,9 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
   const touched = new Map<string, number>();
   const mark = (key: string) => void touched.set(key, ++seq);
   const unchangedSince = (key: string, start: number) => (touched.get(key) ?? 0) <= start;
+  let passes = 0;
+  /** The pass in which each folder was last listed whole, or each ledger last read or written whole. */
+  const readIn = new Map<string, number>();
 
   let derived: Derived | null = null;
   let previous = new Map<MemoId, { readonly key: string; readonly header: MemoHeader; readonly row: MemoRow }>();
@@ -264,7 +277,10 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
 
   function observeRead(path: WikiPath, text: string | null, start: number): void {
     const t = touchedBy(path);
-    if (t?.kind === 'ledger' && unchangedSince(path, start)) setLedger(path, text ?? '');
+    if (t?.kind === 'ledger' && unchangedSince(path, start)) {
+      setLedger(path, text ?? '');
+      readIn.set(path, passes);
+    }
     if (t?.kind === 'memo') sawMemoFile(t.dir, t.name, path, text, unchangedSince(t.dir, start));
   }
 
@@ -277,6 +293,10 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
       const r = await op();
       after(r);
       return r;
+    } catch (e) {
+      // The write may have landed part way: the next pass reads it again.
+      readIn.delete(key);
+      throw e;
     } finally {
       mark(key);
     }
@@ -285,7 +305,10 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
   /** The file at `path` now holds `text`. */
   function wrote(path: WikiPath, text: string): void {
     const t = touchedBy(path);
-    if (t?.kind === 'ledger') setLedger(path, text);
+    if (t?.kind === 'ledger') {
+      setLedger(path, text);
+      readIn.set(path, passes);
+    }
     if (t?.kind === 'memo') {
       setName(t.dir, t.name, true);
       sawMemoFile(t.dir, t.name, path, text, true);
@@ -302,7 +325,10 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
     async list(dir) {
       const start = seq;
       const names = await inner.list(dir);
-      if (memoDirOf(dir) && unchangedSince(dir, start)) setFolder(dir, new Set(names), true);
+      if (memoDirOf(dir) && unchangedSince(dir, start)) {
+        setFolder(dir, new Set(names), true);
+        readIn.set(dir, passes);
+      }
       return names;
     },
     create: (path, text) =>
@@ -315,7 +341,10 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
     remove: (path) =>
       mutate(path, () => inner.remove(path), () => {
         const t = touchedBy(path);
-        if (t?.kind === 'ledger') setLedger(path, '');
+        if (t?.kind === 'ledger') {
+          setLedger(path, '');
+          readIn.set(path, passes);
+        }
         if (t?.kind === 'memo') {
           setName(t.dir, t.name, false);
           if (holdRouting.delete(path)) changed();
@@ -455,9 +484,23 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
     return out;
   }
 
+  const readThisPass = (key: string, pass: Pass) => pass.id === passes && readIn.get(key) === pass.id;
+
   return {
     fs,
     journal,
+    pass: () => ({ id: ++passes }),
+    passFs: (pass) => ({
+      ...fs,
+      async list(dir) {
+        const f = folders.get(dir);
+        return f?.whole && memoDirOf(dir) && readThisPass(dir, pass) ? [...f.names].sort() : fs.list(dir);
+      },
+      async readText(path) {
+        const l = ledgers.get(path);
+        return l && touchedBy(path)?.kind === 'ledger' && readThisPass(path, pass) ? l.text : fs.readText(path);
+      },
+    }),
     current: () => derive().book,
     watch(listener) {
       listeners.add(listener);

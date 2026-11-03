@@ -17,7 +17,7 @@ import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { readPlaces } from '../core/wiki';
 import { classify, type Unavailable } from '../agent/model';
-import type { Ctx, Engine, ReleaseResult, RouteReport } from './engine';
+import type { Ctx, Engine, Pass, ReleaseResult, RouteReport } from './engine';
 
 export const memoFile = {
   inbox: (id: MemoId) => `${paths.inbox}/${id}.md` as WikiPath,
@@ -57,16 +57,16 @@ async function relocate(fs: Fs, from: WikiPath, to: WikiPath, text: string): Pro
 type Decision = { readonly domain: DomainName; readonly routing: Routing };
 
 export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' | 'confirm' | 'move' | 'retry'> & {
-  readonly finishMoves: (d: DomainName) => Promise<void>;
+  readonly finishMoves: (d: DomainName, pass?: Pass) => Promise<void>;
   readonly refresh: Engine['book']['refresh'];
 } {
   const { fs } = ctx;
-  const places = async (config: WikiConfig): Promise<Places> => readPlaces(fs, config, await ctx.journal.running());
+  const places = async (config: WikiConfig, pass?: Pass): Promise<Places> => readPlaces(pass ? ctx.book.passFs(pass) : fs, config, await ctx.journal.running());
 
   /** Inside the memo lane: rejects a bad inbox file, or drops a duplicate, or answers the oldest memo to route. */
-  async function pickNext(config: WikiConfig): Promise<RouteReport | Memo> {
+  async function pickNext(config: WikiConfig, pass: Pass | undefined): Promise<RouteReport | Memo> {
     const memos: Memo[] = [];
-    for (const name of await fs.list(paths.inbox)) {
+    for (const name of await (pass ? ctx.book.passFs(pass) : fs).list(paths.inbox)) {
       const path = name.endsWith('.md') ? parseWikiPath(`${paths.inbox}/${name}`) : null;
       const text = path ? await fs.readText(path) : null;
       // Empty: an accept cut off between making the file and writing it.
@@ -80,7 +80,7 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
     }
     const memo = memos.sort((a, b) => (orderKey(a.capturedAt, a.id) < orderKey(b.capturedAt, b.id) ? -1 : 1))[0];
     if (!memo) return { kind: 'idle' };
-    const at = locate(await places(config), memo.id);
+    const at = locate(await places(config, pass), memo.id);
     if (at) {
       const copy = at.state === 'held' ? memoFile.hold(at.domain, memo.id) : memoFile.raw(at.domain, memo.id);
       if ((at.state !== 'routed' && at.state !== 'held') || isMemo(await fs.readText(copy), memo.id)) {
@@ -174,11 +174,11 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
       });
     },
 
-    routeNext(signal) {
+    routeNext(signal, pass) {
       return ctx.router(async () => {
         const c = await ctx.config();
         if (!c.ok) return { kind: 'paused', problems: c.problems };
-        const picked = await ctx.memoLane(() => pickNext(c.config));
+        const picked = await ctx.memoLane(() => pickNext(c.config, pass));
         if ('kind' in picked) return picked;
         const d = await decide(c.config, picked, signal);
         if (!('domain' in d)) return d.kind === 'cancelled' ? d : { kind: 'unavailable', unavailable: d };
@@ -249,11 +249,11 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
      * `by: user, from: d` gets its moved line; a raw copy whose moved line is already there goes;
      * and a copy into d that does not parse goes while a whole copy of the memo is elsewhere.
      */
-    finishMoves(d) {
+    finishMoves(d, pass) {
       return ctx.memoLane(async () => {
         const c = await ctx.config();
         if (!c.ok) return;
-        const p = await places(c.config);
+        const p = await places(c.config, pass);
         const here = p.domains.find((x) => x.domain === d);
         for (const id of here?.raw ?? []) {
           const t = here!.ledger.history('ingest', id).terminal?.kind;

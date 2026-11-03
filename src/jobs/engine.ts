@@ -5,7 +5,9 @@
  * crash needs (transaction.ts) and the memo book's immutable facts (book.ts).
  *
  * The engine sees its Fs and JournalStore only through the book, so the screens' read model is
- * fed by the engine's own reads and writes and never lists the folder on its own.
+ * fed by the engine's own reads and writes and never lists the folder on its own. The one
+ * exception to "read again by every call": inside a runner pass, a memo folder or ledger read once
+ * is answered from the book, so an idle pass lists each memo folder once.
  *
  * Outside src/jobs only this file, runner.ts, and sqlite.ts are imported (boundary.test.ts).
  *
@@ -27,13 +29,13 @@ import type { DomainName, MemoId } from '../core/types';
 import { readConfig } from '../core/wiki';
 import { LIMITS, type AgentLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
-import { openBook, type Book, type BookParts, type BookStore } from './book';
+import { openBook, type Book, type BookParts, type BookStore, type Pass } from './book';
 import { domainJobs } from './domain';
 import { lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
 
-export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow } from './book';
+export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow, Pass } from './book';
 export type { Finished, Placement } from '../core/places';
 export type { FailureCode, MemoFailure } from '../core/filing';
 
@@ -78,13 +80,15 @@ export type Engine = {
   /** Writes inbox/<id>.md and never calls the model. Sending the same id again changes nothing. */
   accept(memo: NewMemo): Promise<AcceptResult>;
   /** Routes the oldest inbox memo by its hint, the classifier, or the fallback, into raw/ or hold/. */
-  routeNext(signal: AbortSignal): Promise<RouteReport>;
+  routeNext(signal: AbortSignal, pass?: Pass): Promise<RouteReport>;
   /**
    * Runs the domain's next job as one transaction ending in exactly one ledger line, or none when
    * the model is unavailable or the run is cancelled. Answers first, then memos, oldest first.
    * `withModel: false` runs only jobs that need no model.
    */
-  runNext(domain: DomainName, opts: { readonly withModel: boolean; readonly signal: AbortSignal }): Promise<RunReport>;
+  runNext(domain: DomainName, opts: { readonly withModel: boolean; readonly signal: AbortSignal; readonly pass?: Pass }): Promise<RunReport>;
+  /** A runner pass: routeNext and runNext given it read each memo folder and ledger once in it. */
+  pass(): Pass;
   /** A held memo into its domain's raw/, byte for byte. */
   confirm(id: MemoId): Promise<ReleaseResult>;
   /** A held or gave-up memo into another domain, with routing `by: user`. Never an ingested one. */
@@ -170,6 +174,7 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     move: memos.move,
     retry: memos.retry,
     runNext: jobs.runNext,
+    pass: book.pass,
     async domains() {
       const c = await config();
       return c.ok ? [...c.config.domains.keys()] : null;

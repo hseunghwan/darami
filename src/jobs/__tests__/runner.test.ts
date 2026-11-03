@@ -16,6 +16,7 @@ type Call = { readonly what: 'route' } | { readonly what: 'run'; readonly d: Dom
 function scripted(routes: RouteReport[], runs: Partial<Record<DomainName, (RunReport | ((c: Call) => Promise<RunReport>))[]>>) {
   const calls: Call[] = [];
   const engine = {
+    pass: () => ({ id: 1 }),
     domains: async () => [A, B],
     routeNext: async () => (calls.push({ what: 'route' }), routes.shift() ?? { kind: 'idle' }),
     runNext: async (d: DomainName, o: { withModel: boolean; signal: AbortSignal }) => {
@@ -115,6 +116,7 @@ test('leaving the foreground aborts the job in flight; the job comes back cancel
 test('an unreachable folder pauses the runner until it is resumed', async () => {
   let reachable = false;
   const engine = {
+    pass: () => ({ id: 1 }),
     domains: async () => {
       if (!reachable) throw new FolderUnreachable('content://gone');
       return [A];

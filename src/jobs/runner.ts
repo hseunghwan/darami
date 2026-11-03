@@ -56,11 +56,12 @@ export function createRunner(deps: RunnerDeps): Runner {
     try {
       const engine = await deps.engine();
       if (!engine) return DRAINED;
+      const one = engine.pass();
       for (;;) {
         const domains = await engine.domains();
         if (!domains || signal.aborted) return DRAINED;
         if (modelAllowed(s, null, deps.now())) {
-          const r = await engine.routeNext(signal);
+          const r = await engine.routeNext(signal, one);
           s = afterRoute(s, r, deps.now());
           if (r.kind !== 'idle') deps.onReport({ where: 'router', ...r });
           if (r.kind === 'cancelled' || r.kind === 'paused') return DRAINED;
@@ -68,7 +69,7 @@ export function createRunner(deps: RunnerDeps): Runner {
         }
         let ran = false;
         for (const d of rotation(s, domains)) {
-          const r = await engine.runNext(d, { withModel: modelAllowed(s, d, deps.now()), signal });
+          const r = await engine.runNext(d, { withModel: modelAllowed(s, d, deps.now()), signal, pass: one });
           s = afterRun(s, d, r, deps.now());
           if (r.kind === 'idle') continue;
           deps.onReport({ where: 'domain', domain: d, ...r });
