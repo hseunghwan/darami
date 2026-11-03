@@ -27,7 +27,7 @@ export function addressOf(p: Geocoded): string | null {
   return p.name && !full.includes(p.name) ? `${full} (${p.name})` : full;
 }
 
-/** A photo's own GPS fix as place and address. Null on any failure: the gateway still has the coordinates. */
+/** A photo's own GPS fix as place and address. Null on any failure: the memo still has the coordinates. */
 export async function geocode(lat: number, lon: number): Promise<{ place: string | null; address: string | null } | null> {
   const p = (await within(3_000, Location.reverseGeocodeAsync({ latitude: lat, longitude: lon })))?.[0];
   return p ? { place: placeOf(p), address: addressOf(p) } : null;

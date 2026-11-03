@@ -1,4 +1,15 @@
-import type { MemoAttachmentWire, MemoRequest, MemoSourceWire } from './wire';
+import type { MemoSource } from '../core/pages';
+
+/** The snake_case record core's parseMemo validates, so a typed or shared memo is checked by the code that reads a memo file. */
+export type MemoRequest = {
+  readonly id: string;
+  readonly text: string;
+  readonly captured_at: string;
+  readonly tz: string;
+  readonly location: GeoFix | null;
+  readonly source: MemoSource;
+  readonly domain_hint: string | null;
+};
 
 const pad = (n: number) => String(Math.trunc(Math.abs(n))).padStart(2, '0');
 
@@ -22,17 +33,16 @@ export function deviceTimeZone(): string {
 /** `place` is shown in the app (구 and 동); `address` is only recorded (down to the 번지 or building). */
 export type GeoFix = { lat: number; lon: number; place: string | null; address: string | null };
 
+/** No photos: they come with P6, and accept refuses them until then. */
 export type CaptureInput = {
-  id: string;
-  text: string;
-  at: Date;
-  source: MemoSourceWire;
-  domainHint: string | null;
-  location: GeoFix | null;
-  attachments: MemoAttachmentWire[];
+  readonly id: string;
+  readonly text: string;
+  readonly at: Date;
+  readonly source: MemoSource;
+  readonly domainHint: string | null;
+  readonly location: GeoFix | null;
 };
 
-/** Built once and frozen into the outbox; resending the same JSON is what makes the POST idempotent. */
 export function buildMemoRequest(input: CaptureInput): MemoRequest {
   return {
     id: input.id,
@@ -42,6 +52,5 @@ export function buildMemoRequest(input: CaptureInput): MemoRequest {
     location: input.location,
     source: input.source,
     domain_hint: input.domainHint,
-    ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
   };
 }

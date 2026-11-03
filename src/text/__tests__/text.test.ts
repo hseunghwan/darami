@@ -14,10 +14,7 @@ const ARGS: Record<string, unknown[][]> = {
   'failure.allBlocked': [[3]],
   'failure.retrying': [[2]],
   'failure.tried': [[1], [2]],
-  'network.timeout': [[8]],
-  'network.photo': [[2, 'HTTP 500']],
   'onboarding.steps': [[1, 3]],
-  'onboarding.found': [[1], [4]],
   'login.waiting': [[DAY]],
   'login.loggedIn': [['me@example.com', 'plus'], [null, null]],
   'folder.empty': [['wiki']],
@@ -32,8 +29,6 @@ const ARGS: Record<string, unknown[][]> = {
   'status.filing': [[2]],
   'status.waiting': [[1], [3]],
   'filing.invalid': [['text: over 64 KiB']],
-  'memoTab.reconnect': [[2]],
-  'memoTab.offline': [[2]],
   'photos.nth': [[1, 'Chicago'], [2, null]],
   'photos.remove': [[1]],
   'photos.count': [[1], [3]],
@@ -48,17 +43,8 @@ const ARGS: Record<string, unknown[][]> = {
   'detail.probably': [['learning']],
   'detail.sure': [[true], [false]],
   'detail.more': [['broken-link x.md']],
-  'detail.moving': [['learning']],
   'detail.rawKept': [['learning']],
   'detail.confirm': [['learning']],
-  'move.moving': [['learning']],
-  'chat.savedTo': [['learning']],
-  'chat.askDomain': [['learning']],
-  'chat.rememberedIn': [['learning']],
-  'chats.turns': [[1], [5]],
-  'chats.remove': [['RAG question']],
-  'settings.unsent': [[1], [2]],
-  'settings.rejected': [[1], [2]],
   'settings.loginExpired': [['me@example.com'], [null]],
   'settings.waiting': [[1], [3]],
 };
@@ -103,10 +89,10 @@ describe('locale', () => {
 
   it('follows the phone language at startup', () => {
     expect(loadAs('en-US').locale).toBe('en');
-    expect(loadAs('en-US').copy.tabs.chat).toBe('Ask');
+    expect(loadAs('en-US').copy.tabs.activity).toBe('Activity');
     expect(loadAs('ko-KR').locale).toBe('ko');
-    expect(loadAs('ko-KR').copy.tabs.chat).toBe('질문');
-    expect(loadAs('fr-FR').copy.tabs.chat).toBe('Ask');
+    expect(loadAs('ko-KR').copy.tabs.activity).toBe('기록');
+    expect(loadAs('fr-FR').copy.tabs.activity).toBe('Activity');
   });
 });
 
@@ -122,6 +108,11 @@ describe('tables', () => {
   it('en has no Hangul in any sentence', () => {
     const korean = sentences(COPY.en).filter((s) => HANGUL.test(s));
     expect(korean).toEqual([]);
+  });
+
+  it('no sentence in either language talks about a computer, a gateway, Tailscale, or pairing by QR', () => {
+    const elsewhere = /computer|gateway|tailscale|\bQR\b|컴퓨터|게이트웨이/i;
+    expect([...sentences(COPY.ko), ...sentences(COPY.en)].filter((s) => elsewhere.test(s))).toEqual([]);
   });
 
   it('en counts in singular and plural', () => {

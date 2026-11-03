@@ -1,6 +1,4 @@
-import * as Crypto from 'expo-crypto';
 import * as Network from 'expo-network';
-import * as SecureStore from 'expo-secure-store';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import type { MachineFacts } from './core/config';
@@ -14,18 +12,12 @@ import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCo
 import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
 import { parseSafTree, type SafTree } from './fs/saf-uri';
-import { buildMemoRequest, type CaptureInput, type GeoFix } from './lib/capture';
-import { kv, outbox } from './lib/db';
-import { adopt, sweepPending } from './lib/files';
-import { createFlusher } from './lib/flusher';
-import { gateway, observeGateway } from './lib/gateway';
+import { buildMemoRequest, type GeoFix } from './lib/capture';
+import { kv } from './lib/db';
+import { sweepPending } from './lib/files';
 import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
-import { flushOnce } from './lib/outbox';
-import { parseStoredPairing, type Pairing } from './lib/pairing';
-import { attachmentsOf, type DraftPhoto } from './lib/photos';
-import type { StatusResponse } from './lib/wire';
 import { openEngine, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type ReleaseResult } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteJournal } from './jobs/sqlite';
@@ -49,15 +41,8 @@ export type JobsView = {
 
 export type App = {
   ready: boolean;
-  pairing: Pairing | null;
-  /** Domain folder names from the last GET /status, cached so the chips work offline. */
-  domains: string[];
-  /** null until the first call answers or fails. */
-  reachable: boolean | null;
-  /** A 401 paused the outbox; the user has to pair again. */
-  authLost: boolean;
   settings: Settings;
-  /** The wiki folder the user kept. Its domains are its own; `domains` above stays the gateway's until P4. */
+  /** The wiki folder the user kept. */
   folder: Folder | null;
   jobs: JobsView;
   login: Login;
@@ -68,8 +53,7 @@ export type App = {
 };
 
 let app: App = {
-  ready: false, pairing: null, domains: [], reachable: null, authLost: false, settings: { location: false, theme: 'system' }, folder: null,
-  jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null,
+  ready: false, settings: { location: false, theme: 'system' }, folder: null, jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null,
 };
 const listeners = new Set<() => void>();
 
@@ -86,59 +70,6 @@ export function useApp<T>(select: (a: App) => T): T {
 }
 
 export const getApp = (): App => app;
-
-const flusher = createFlusher({
-  pass: async () => {
-    const p = app.pairing;
-    if (!p || app.authLost) return { kind: 'paused' };
-    return flushOnce(
-      outbox.store,
-      (row) => gateway.postMemo(p, row.body),
-      (_row, file) => gateway.putAttachment(p, file),
-    );
-  },
-  setTimer: (ms, fire) => {
-    const t = setTimeout(fire, ms);
-    return () => clearTimeout(t);
-  },
-  onResult: () => {},
-});
-
-export const flushNow = (): Promise<void> => flusher.trigger();
-
-/** Saves the memo to the outbox first; the returned promise is only the send attempt. */
-export async function capture(input: Omit<CaptureInput, 'id' | 'at' | 'attachments'> & { photos?: readonly DraftPhoto[] }): Promise<{ id: string; sent: Promise<void> }> {
-  const id = Crypto.randomUUID();
-  const at = new Date();
-  const { photos = [], ...rest } = input;
-  const files: { n: number; path: string }[] = [];
-  for (const [i, photo] of photos.entries()) files.push({ n: i + 1, path: await adopt(photo.uri, id, i + 1) });
-  const body = buildMemoRequest({ ...rest, id, at, attachments: attachmentsOf(photos) });
-  await outbox.enqueue(id, JSON.stringify(body), at.toISOString(), files);
-  return { id, sent: flusher.trigger() };
-}
-
-export async function pair(pairing: Pairing, status: StatusResponse): Promise<void> {
-  await SecureStore.setItemAsync('pairing', JSON.stringify(pairing));
-  await rememberDomains(status);
-  set({ pairing, authLost: false, reachable: true });
-  void flusher.resume();
-}
-
-async function rememberDomains(status: StatusResponse): Promise<void> {
-  const domains = Object.keys(status.domains);
-  set({ domains });
-  await kv.set('domains', JSON.stringify(domains));
-}
-
-export async function refreshStatus(): Promise<StatusResponse | null> {
-  const p = app.pairing;
-  if (!p) return null;
-  const r = await gateway.status(p);
-  if (!r.ok) return null;
-  await rememberDomains(r.data);
-  return r.data;
-}
 
 export async function updateSettings(patch: Partial<Settings>): Promise<void> {
   const settings = { ...app.settings, ...patch };
@@ -160,7 +91,7 @@ function note(n: JobNote): void {
   noteListeners.forEach((l) => l(n));
 }
 
-/** Every runner report and engine event, the recent ones first: the dev screen's log, and P4's activity until it reads the ledgers. */
+/** Every runner report and engine event, the recent ones first: the dev screen's log. */
 export function observeJobs(listener: (n: JobNote) => void): () => void {
   notes.forEach(listener);
   noteListeners.add(listener);
@@ -282,8 +213,6 @@ const runner = createRunner({
 
 /** Runs a pass now: what a sent memo, the foreground, a kept folder, and the dev screen do. */
 export const runJobs = (): Promise<void> => runner.trigger();
-/** After a login: model work paused on the old one goes on. */
-export const jobsLoggedIn = (): Promise<void> => runner.loggedIn();
 
 /** A memo as compose holds it. `id` lives as long as the draft, so sending again after a failure is the same memo. */
 export type Capture = {
@@ -305,7 +234,7 @@ export type Filed =
 
 /** Resolves only after accept answers, so the caller clears its draft on `filed` and on nothing else. */
 export async function fileMemo(c: Capture): Promise<Filed> {
-  const parsed = parseMemo(buildMemoRequest({ id: c.id, text: c.text, at: new Date(), source: c.source, domainHint: c.domainHint, location: c.location, attachments: [] }));
+  const parsed = parseMemo(buildMemoRequest({ id: c.id, text: c.text, at: new Date(), source: c.source, domainHint: c.domainHint, location: c.location }));
   if (!parsed.ok) return { kind: 'invalid', detail: parsed.detail };
   try {
     const engine = await usableEngine();
@@ -437,15 +366,6 @@ function parseFolder(text: string | null): Folder | null {
   return t?.ok ? { tree: t.value, state: null } : null;
 }
 
-function parseDomains(text: string | null): string[] {
-  try {
-    const v: unknown = text ? JSON.parse(text) : [];
-    return Array.isArray(v) ? v.filter((d): d is string => typeof d === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
 function parseSettings(text: string | null): Settings {
   try {
     const v = text ? (JSON.parse(text) as Partial<Settings>) : {};
@@ -462,36 +382,21 @@ let booted: Promise<void> | null = null;
 
 export function boot(): Promise<void> {
   booted ??= (async () => {
-    observeGateway({
-      unauthorized: () => set({ authLost: true }),
-      reachability: (reachable) => {
-        if (reachable !== app.reachable) set({ reachable });
-      },
-    });
-    const [pairing, domains, settings, folder, session] = await Promise.all([
-      SecureStore.getItemAsync('pairing').then(parseStoredPairing),
-      kv.get('domains').then(parseDomains),
+    const [settings, folder, session] = await Promise.all([
       kv.get('settings').then(parseSettings),
       kv.get('folder').then(parseFolder),
       loadSession().catch(() => ({ kind: 'none' }) as const),
     ]);
-    set({ ready: true, pairing, domains, settings, folder, login: loginOf(session, false) });
+    set({ ready: true, settings, folder, login: loginOf(session, false) });
     void recheckFolder();
     sweepPending();
 
-    AppState.addEventListener('change', (s) => {
-      flusher.setForeground(s === 'active');
-      runner.setForeground(s === 'active');
-    });
+    AppState.addEventListener('change', (s) => runner.setForeground(s === 'active'));
     void Network.getNetworkStateAsync().then((n) => set({ online: n.isConnected ?? null }), () => {});
     Network.addNetworkStateListener((e) => {
       if ((e.isConnected ?? null) !== app.online) set({ online: e.isConnected ?? null });
-      if (!e.isConnected) return;
-      void flusher.trigger();
-      void runner.networkBack();
+      if (e.isConnected) void runner.networkBack();
     });
-    void flusher.trigger();
-    if (pairing) void refreshStatus();
   })();
   return booted;
 }

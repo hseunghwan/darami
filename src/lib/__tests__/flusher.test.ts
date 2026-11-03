@@ -49,7 +49,7 @@ it('starts a fresh pass for a trigger after the previous one finished', async ()
   expect(h.passes()).toBe(2);
 });
 
-it('retries on a timer with growing backoff while the gateway is unreachable', async () => {
+it('retries on a timer with growing backoff while a pass keeps failing', async () => {
   const h = harness([backoff, backoff, drained]);
   await h.flusher.trigger();
   expect(h.timers).toEqual([5_000]);

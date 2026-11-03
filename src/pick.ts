@@ -5,7 +5,8 @@ import { Linking } from 'react-native';
 import OriginalPhoto, { type LatLong } from '../modules/original-photo';
 import { keepCameraShot, pendingUri } from './lib/files';
 import { geocode } from './lib/location';
-import type { DraftPhoto, PhotoOrigin } from './lib/photos';
+import type { PhotoOrigin } from './core/photos';
+import type { DraftPhoto } from './lib/photos';
 
 // Where photos come from. The system photo picker blanks GPS on the way out (issuetracker 243294058),
 // so the gallery is our own grid over MediaStore, read with ACCESS_MEDIA_LOCATION and setRequireOriginal.

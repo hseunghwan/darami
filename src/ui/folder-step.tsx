@@ -1,7 +1,4 @@
-/**
- * The onboarding step that picks the wiki folder. Its own file, so P4's rewrite of onboarding.tsx,
- * which deletes ConnectStep and its pairing imports, does not touch it.
- */
+/** The onboarding step that picks the wiki folder; settings' Change folder runs it alone. */
 
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
