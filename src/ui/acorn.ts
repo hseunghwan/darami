@@ -67,7 +67,7 @@ export function pathLength(d: string): number {
   let y = 0;
   let cmd = '';
   for (let i = 0; i < tokens.length; ) {
-    if (/[MLC]/.test(tokens[i])) cmd = tokens[i++];
+    if (/[MLC]/.test(tokens[i]!)) cmd = tokens[i++]!;
     const n = (k: number) => Number(tokens[i + k]);
     if (cmd === 'M') {
       [x, y] = [n(0), n(1)];

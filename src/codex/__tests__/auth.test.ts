@@ -15,7 +15,7 @@ function scripted(answers: { status: number; body: unknown }[]): { fetch: Fetch;
   const fetchFn = (async (url: string, init: RequestInit) => {
     const a = answers.shift();
     if (!a) throw new Error(`unexpected call to ${url}`);
-    calls.push({ url, body: String(init.body), contentType: (init.headers as Record<string, string>)['content-type'] });
+    calls.push({ url, body: String(init.body), contentType: (init.headers as Record<string, string>)['content-type']! });
     return { status: a.status, text: async () => (typeof a.body === 'string' ? a.body : JSON.stringify(a.body)) };
   }) as unknown as Fetch;
   return { fetch: fetchFn, calls };
