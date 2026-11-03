@@ -188,6 +188,20 @@ export const en: Copy = {
       unreachable: "Can't open it. Pick it again",
     },
   },
+  status: {
+    login: 'Log in again',
+    folder: 'Wiki folder needs you',
+    offline: 'Offline',
+    limited: (until) => `Usage limit until ${clock(until)}`,
+    trouble: "ChatGPT isn't answering",
+    filing: (n) => `Filing ${n}`,
+    waiting: (n) => `${n} waiting`,
+  },
+  filing: {
+    noWiki: 'There is no wiki folder to save into. Pick one in Settings.',
+    invalid: (detail) => `This memo can't be saved: ${detail}`,
+    notSaved: "Couldn't save it to the wiki folder. The text is still here; try again.",
+  },
   memoTab: {
     reconnect: (waiting) => `Reconnect needed · ${waiting} waiting`,
     online: 'Computer connected',
@@ -282,6 +296,8 @@ export const en: Copy = {
     note: 'Add a line (optional)',
     noteLabel: 'Add a line',
     notePlaceholder: 'Say why you are saving it for a better summary',
+    photosLater: 'Photos come in a later version. Only the text is saved.',
+    onlyPhotos: "Photos come in a later version, so there's nothing to save yet.",
   },
   chat: {
     title: 'Ask',

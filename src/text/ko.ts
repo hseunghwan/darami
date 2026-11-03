@@ -200,6 +200,20 @@ export const ko = {
       unreachable: '열 수 없어요. 다시 골라 주세요',
     },
   },
+  status: {
+    login: '다시 로그인 필요',
+    folder: '위키 폴더 확인 필요',
+    offline: '오프라인',
+    limited: (until: Date) => `사용 한도 · ${clock(until)}까지`,
+    trouble: 'ChatGPT가 응답하지 않아요',
+    filing: (n: number) => `정리 중 ${n}`,
+    waiting: (n: number) => `${n}개 대기`,
+  },
+  filing: {
+    noWiki: '저장할 위키 폴더가 없어요. 설정에서 골라 주세요.',
+    invalid: (detail: string) => `이 메모는 저장할 수 없어요: ${detail}`,
+    notSaved: '위키 폴더에 저장하지 못했어요. 글은 그대로 있으니 다시 해 주세요.',
+  },
   memoTab: {
     reconnect: (waiting: number) => `다시 연결 필요 · ${waiting}개 대기`,
     online: '컴퓨터 연결됨',
@@ -294,6 +308,8 @@ export const ko = {
     note: '한 줄 덧붙이기 (선택)',
     noteLabel: '한 줄 덧붙이기',
     notePlaceholder: '왜 저장하는지 적어 두면 요약이 더 좋아져요',
+    photosLater: '사진은 다음 버전부터 저장돼요. 글만 저장해요.',
+    onlyPhotos: '사진은 다음 버전부터 저장돼서 아직 저장할 게 없어요.',
   },
   chat: {
     title: '질문',

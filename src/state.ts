@@ -1,26 +1,30 @@
 import * as Crypto from 'expo-crypto';
 import * as Network from 'expo-network';
 import * as SecureStore from 'expo-secure-store';
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import type { MachineFacts } from './core/config';
+import { FolderUnreachable } from './core/fs';
 import { parseMemo } from './core/pages';
+import type { DomainName } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { phoneModel } from './agent/codex';
 import { MODEL_PROFILES } from './agent/model';
+import { loadSession } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
 import { parseSafTree, type SafTree } from './fs/saf-uri';
-import { buildMemoRequest, type CaptureInput } from './lib/capture';
+import { buildMemoRequest, type CaptureInput, type GeoFix } from './lib/capture';
 import { kv, outbox } from './lib/db';
 import { adopt, sweepPending } from './lib/files';
 import { createFlusher } from './lib/flusher';
 import { gateway, observeGateway } from './lib/gateway';
-import type { Candidate, Usable } from './lib/folder';
+import { isUsable, type Candidate, type Usable } from './lib/folder';
+import { loginOf, type Login } from './lib/login';
 import { flushOnce } from './lib/outbox';
 import { parseStoredPairing, type Pairing } from './lib/pairing';
 import { attachmentsOf, type DraftPhoto } from './lib/photos';
 import type { StatusResponse } from './lib/wire';
-import { openEngine, type AcceptResult, type Engine, type EngineEvent } from './jobs/engine';
+import { openEngine, type Engine, type EngineEvent, type MemoBook } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
@@ -54,11 +58,16 @@ export type App = {
   /** The wiki folder the user kept. Its domains are its own; `domains` above stays the gateway's until P4. */
   folder: Folder | null;
   jobs: JobsView;
+  login: Login;
+  /** The kept folder's memos once its engine opened; null with no usable folder or before it opens. */
+  book: MemoBook | null;
+  /** Whether the phone has a network, as expo-network last said; null until it answers. */
+  online: boolean | null;
 };
 
 let app: App = {
   ready: false, pairing: null, domains: [], reachable: null, authLost: false, settings: { location: false, theme: 'system' }, folder: null,
-  jobs: { paused: null, last: null },
+  jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null,
 };
 const listeners = new Set<() => void>();
 
@@ -157,11 +166,14 @@ export function observeJobs(listener: (n: JobNote) => void): () => void {
 }
 
 /** One engine per kept wiki folder: two on one folder would each take the other's live job for stale. */
-let opened: { readonly uri: string; readonly engine: Promise<Engine> } | null = null;
+let opened: { readonly uri: string; readonly engine: Promise<Engine>; unwatch: () => void } | null = null;
 
+/** Opened for a broken wiki too: memos still go into inbox/ and wait until dotoriwiki.yaml is fixed. */
 function engineFor(folder: Folder | null): Promise<Engine> | null {
-  if (folder?.state?.kind !== 'wiki') return null;
+  if (!folder?.state || !isUsable(folder.state)) return null;
   if (opened?.uri !== folder.tree.uri) {
+    opened?.unwatch();
+    if (app.book) set({ book: null });
     const engine = openEngine({
       fs: safFs(folder.tree),
       journal: sqliteJournal(folder.tree.uri),
@@ -171,15 +183,44 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       now: () => new Date(),
       onEvent: note,
     });
-    const mine = { uri: folder.tree.uri, engine };
+    const mine = { uri: folder.tree.uri, engine, unwatch: () => {} };
     opened = mine;
-    // A folder that did not answer is opened again on the next pass.
-    engine.catch(() => {
-      if (opened === mine) opened = null;
-    });
+    engine.then(
+      (e) => {
+        if (opened !== mine) return;
+        const show = () => set({ book: e.book.current() });
+        mine.unwatch = e.book.watch(show);
+        show();
+      },
+      // A folder that did not answer is opened again on the next pass.
+      () => {
+        if (opened === mine) opened = null;
+      },
+    );
   }
   return opened.engine;
 }
+
+/** The kept folder's engine, once the inspection in flight answers: a share sent at a cold start waits for it instead of finding no folder. */
+async function usableEngine(): Promise<Engine | null> {
+  if (app.folder && app.folder.state === null) await recheckFolder();
+  return engineFor(app.folder);
+}
+
+/** The kept wiki's declared domains in config order: the hint chips and the move sheet. Empty while it is not a wiki. */
+export function useDomains(): readonly DomainName[] {
+  const domains = useApp((a) => (a.folder?.state?.kind === 'wiki' ? a.folder.state.config.domains : null));
+  return useMemo(() => (domains ? [...domains.keys()] : []), [domains]);
+}
+
+/** A 401 that a forced refresh did not cure, this launch: the login reads expired even while its tokens are stored. */
+let refused = false;
+
+async function readLogin(): Promise<void> {
+  set({ login: loginOf(await loadSession(), refused) });
+}
+
+const isLoginPause = (r: RunnerReport) => (r.where === 'router' || r.where === 'domain') && r.kind === 'unavailable' && r.unavailable.cause === 'login';
 
 const runner = createRunner({
   engine: async () => engineFor(app.folder),
@@ -191,6 +232,11 @@ const runner = createRunner({
   onReport: (r) => {
     set({ jobs: { ...app.jobs, last: r } });
     note(r);
+    if (isLoginPause(r)) {
+      refused = true;
+      void readLogin();
+    }
+    if (r.where === 'runner' && r.kind === 'unreachable') void recheckFolder();
   },
   onSettled: () => {
     const { pause } = runner.schedule();
@@ -203,16 +249,39 @@ export const runJobs = (): Promise<void> => runner.trigger();
 /** After a login: model work paused on the old one goes on. */
 export const jobsLoggedIn = (): Promise<void> => runner.loggedIn();
 
-/** Files a typed memo through the engine and wakes the runner: the dev screen's path now, compose's in P4. */
-export async function fileMemo(input: { readonly text: string; readonly domainHint: string | null }): Promise<{ readonly id: string; readonly result: AcceptResult | { readonly kind: 'no-wiki' } | { readonly kind: 'invalid'; readonly detail: string } }> {
-  const id = Crypto.randomUUID();
-  const parsed = parseMemo(buildMemoRequest({ id, text: input.text, at: new Date(), source: 'typed', domainHint: input.domainHint, location: null, attachments: [] }));
-  if (!parsed.ok) return { id, result: { kind: 'invalid', detail: parsed.detail } };
-  const engine = engineFor(app.folder);
-  if (!engine) return { id, result: { kind: 'no-wiki' } };
-  const result = await (await engine).accept(parsed.value);
-  void runner.trigger();
-  return { id, result };
+/** A memo as compose holds it. `id` lives as long as the draft, so sending again after a failure is the same memo. */
+export type Capture = {
+  readonly id: string;
+  readonly text: string;
+  readonly source: 'typed' | 'share' | 'selection';
+  readonly domainHint: string | null;
+  readonly location: GeoFix | null;
+};
+
+export type Filed =
+  /** inbox/<id>.md is whole: written now, or by an earlier send of the same draft. */
+  | { readonly kind: 'filed' }
+  /** No folder kept, or it reads unreachable, foreign, or empty. */
+  | { readonly kind: 'no-wiki' }
+  | { readonly kind: 'invalid'; readonly detail: string }
+  /** The folder threw part way; sending again with the same id finishes it. */
+  | { readonly kind: 'failed'; readonly message: string };
+
+/** Resolves only after accept answers, so the caller clears its draft on `filed` and on nothing else. */
+export async function fileMemo(c: Capture): Promise<Filed> {
+  const parsed = parseMemo(buildMemoRequest({ id: c.id, text: c.text, at: new Date(), source: c.source, domainHint: c.domainHint, location: c.location, attachments: [] }));
+  if (!parsed.ok) return { kind: 'invalid', detail: parsed.detail };
+  try {
+    const engine = await usableEngine();
+    if (!engine) return { kind: 'no-wiki' };
+    const r = await engine.accept(parsed.value);
+    if (r.kind === 'photos-unsupported') return { kind: 'invalid', detail: r.kind };
+    void runner.trigger();
+    return { kind: 'filed' };
+  } catch (e) {
+    if (e instanceof FolderUnreachable) void recheckFolder();
+    return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale);
@@ -239,17 +308,26 @@ export async function keepFolder(tree: SafTree, state: Usable): Promise<void> {
   void runner.resume();
 }
 
+let inspecting: { readonly uri: string; readonly done: Promise<void> } | null = null;
+
 /**
  * Inspects the kept folder again and shows what it found, unless another folder was kept meanwhile.
- * An I/O error keeps what was shown; the next recheck tries again.
+ * A call while one is in flight shares it. An I/O error keeps what was shown; the next recheck tries again.
  */
-export async function recheckFolder(): Promise<void> {
+export function recheckFolder(): Promise<void> {
   const kept = app.folder;
-  if (!kept) return;
-  const state = await inspect(kept.tree).catch(() => kept.state);
-  if (app.folder?.tree.uri !== kept.tree.uri) return;
-  set({ folder: { tree: kept.tree, state } });
-  if (state?.kind === 'wiki') void runner.resume();
+  if (!kept) return Promise.resolve();
+  if (inspecting?.uri === kept.tree.uri) return inspecting.done;
+  const done = (async () => {
+    const state = await inspect(kept.tree).catch(() => kept.state);
+    if (app.folder?.tree.uri !== kept.tree.uri) return;
+    set({ folder: { tree: kept.tree, state } });
+    if (state && isUsable(state)) void runner.resume();
+  })().finally(() => {
+    if (inspecting?.done === done) inspecting = null;
+  });
+  inspecting = { uri: kept.tree.uri, done };
+  return done;
 }
 
 function parseFolder(text: string | null): Folder | null {
@@ -288,13 +366,14 @@ export function boot(): Promise<void> {
         if (reachable !== app.reachable) set({ reachable });
       },
     });
-    const [pairing, domains, settings, folder] = await Promise.all([
+    const [pairing, domains, settings, folder, session] = await Promise.all([
       SecureStore.getItemAsync('pairing').then(parseStoredPairing),
       kv.get('domains').then(parseDomains),
       kv.get('settings').then(parseSettings),
       kv.get('folder').then(parseFolder),
+      loadSession().catch(() => ({ kind: 'none' }) as const),
     ]);
-    set({ ready: true, pairing, domains, settings, folder });
+    set({ ready: true, pairing, domains, settings, folder, login: loginOf(session, false) });
     void recheckFolder();
     sweepPending();
 
@@ -302,7 +381,9 @@ export function boot(): Promise<void> {
       flusher.setForeground(s === 'active');
       runner.setForeground(s === 'active');
     });
+    void Network.getNetworkStateAsync().then((n) => set({ online: n.isConnected ?? null }), () => {});
     Network.addNetworkStateListener((e) => {
+      if ((e.isConnected ?? null) !== app.online) set({ online: e.isConnected ?? null });
       if (!e.isConnected) return;
       void flusher.trigger();
       void runner.networkBack();

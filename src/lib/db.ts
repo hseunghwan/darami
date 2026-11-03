@@ -116,4 +116,7 @@ export const kv = {
   async set(key: string, value: string): Promise<void> {
     await (await db()).runAsync('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
   },
+  async remove(key: string): Promise<void> {
+    await (await db()).runAsync('DELETE FROM kv WHERE key = ?', key);
+  },
 };

@@ -1,3 +1,4 @@
+import type { Placement } from '../jobs/engine';
 import { copy } from '../text';
 import type { OutboxFile, OutboxRow } from './outbox';
 import { photoCount } from './photos';
@@ -70,6 +71,9 @@ export function activityCounts(status: StatusResponse): { working: number; confi
   }
   return { working, confirm };
 }
+
+/** The first page an ingest changed, under wiki/ without `.md`: the link a memo row shows. */
+export const firstPage = (row: { readonly at: Placement }): string | null => (row.at.state === 'ingested' ? (row.at.pages[0]?.replace(/\.md$/, '') ?? null) : null);
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();

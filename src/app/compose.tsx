@@ -1,68 +1,67 @@
+import * as Crypto from 'expo-crypto';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { BackHandler, KeyboardAvoidingView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { GeoFix } from '../lib/capture';
+import { removeQuietly } from '../lib/files';
 import { locate } from '../lib/location';
-import { canSend } from '../lib/photos';
 import { memoText, parseShared, preview } from '../lib/shared';
-import { fromShare } from '../pick';
-import { capture, getApp } from '../state';
+import { fileMemo, getApp } from '../state';
 import { DomainChips } from '../ui/domain-chips';
 import { Icon } from '../ui/icon';
-import { goBack, PrimaryButton, Sheet } from '../ui/parts';
-import { PhotoButtons, PhotoStrip, usePhotoDraft } from '../ui/photos';
+import { goBack, Notice, PrimaryButton, Sheet } from '../ui/parts';
 import { useTheme } from '../ui/theme';
 import { copy } from '../text';
 
-/** How long Save waits for the send before handing the user back to the app they came from. The row stays queued either way. */
-const SEND_GRACE_MS = 4_000;
-
+/**
+ * The share and text-selection sheet. It stays open, Save busy, until accept answers, and leaves
+ * for the app the text came from only once the memo is whole in the folder. Photos come with P6.
+ */
 export default function Compose() {
   const t = useTheme();
   const params = useLocalSearchParams<{ source?: string; text?: string; subject?: string; photos?: string }>();
   const shared = parseShared(params);
-  const draft = usePhotoDraft();
+  const [id] = useState(() => Crypto.randomUUID());
   const [note, setNote] = useState('');
   const [hint, setHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [fix, setFix] = useState<GeoFix | null>(null);
 
   useEffect(() => {
     if (getApp().settings.location) void locate().then(setFix);
   }, []);
 
-  const sharedPhotos = params.photos;
-  const { add } = draft;
-  useEffect(() => {
-    const uris = parseShared({ source: 'share', photos: sharedPhotos })?.photos ?? [];
-    if (uris.length > 0) void fromShare(uris).then(add);
-  }, [sharedPhotos, add]);
-
-  function close() {
-    draft.discard();
-    goBack();
-  }
+  // CaptureActivity already copied shared photos into files/outbox/pending; nothing reads them until P6.
+  const photos = shared?.photos ?? [];
+  const photoKey = photos.join('\n');
+  useEffect(() => removeQuietly(photoKey ? photoKey.split('\n') : []), [photoKey]);
 
   if (!shared) return <Sheet onClose={goBack}><Text style={{ color: t.muted, fontSize: 14 }}>{copy.compose.nothing}</Text></Sheet>;
   const card = shared.text ? preview(shared) : null;
   const text = memoText(shared, note);
 
   async function save() {
-    if (!shared || !canSend(text, draft.photos)) return;
+    if (!shared || !text.trim() || saving) return;
     setSaving(true);
-    const { sent } = await capture({ text, source: shared.source, domainHint: hint, location: fix, photos: draft.photos });
-    await Promise.race([sent, new Promise((r) => setTimeout(r, SEND_GRACE_MS))]);
-    // Back to the app the text came from: the memo is already safe in the outbox.
-    BackHandler.exitApp();
+    setNotice(null);
+    const r = await fileMemo({ id, text, source: shared.source, domainHint: hint, location: fix });
+    setSaving(false);
+    if (r.kind === 'filed') return BackHandler.exitApp();
+    setNotice(r.kind === 'no-wiki' ? copy.filing.noWiki : r.kind === 'invalid' ? copy.filing.invalid(r.detail) : copy.filing.notSaved);
   }
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-      <Sheet onClose={close}>
+      <Sheet onClose={goBack}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ color: t.fg, fontSize: 17, fontWeight: '600' }}>{copy.compose.title}</Text>
-          <PhotoButtons draft={draft} />
         </View>
+        {photos.length > 0 && (
+          <Notice tone="plain">
+            <Text style={{ color: t.muted, fontSize: 14, lineHeight: 21 }}>{text.trim() ? copy.compose.photosLater : copy.compose.onlyPhotos}</Text>
+          </Notice>
+        )}
         {card && (
           <View style={[st.card, { backgroundColor: t.bg, borderColor: t.cardLine }]}>
             <View style={[st.thumb, { backgroundColor: t.bubble }]}>
@@ -80,7 +79,6 @@ export default function Compose() {
             </View>
           </View>
         )}
-        <PhotoStrip draft={draft} />
 
         <View style={{ gap: 6 }}>
           <Text style={{ color: t.faint, fontSize: 12, fontWeight: '500' }}>{copy.compose.note}</Text>
@@ -99,9 +97,13 @@ export default function Compose() {
           <DomainChips value={hint} onChange={setHint} wrap />
         </View>
 
-        <PrimaryButton label={saving ? copy.common.saving : copy.common.save} busy={saving} disabled={!canSend(text, draft.photos) || draft.busy} onPress={save} />
+        {notice && (
+          <Notice tone="bad">
+            <Text accessibilityRole="alert" style={{ color: t.bad, fontSize: 14, lineHeight: 21 }}>{notice}</Text>
+          </Notice>
+        )}
+        <PrimaryButton label={saving ? copy.common.saving : copy.common.save} busy={saving} disabled={!text.trim()} onPress={save} />
       </Sheet>
-      {draft.sheet}
     </KeyboardAvoidingView>
   );
 }

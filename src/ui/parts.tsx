@@ -56,6 +56,7 @@ export function Chip({ label, on, onPress, small }: { label: string; on: boolean
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ selected: on }}
       onPress={onPress}
       style={[
@@ -129,6 +130,7 @@ export function SmallButton({ label, onPress, icon, filled, disabled, busy, colo
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ disabled: !!(disabled || busy) }}
       disabled={disabled || busy}
       onPress={onPress}
