@@ -33,7 +33,7 @@ ${writeScope}
 - \`[[링크]]\`는 이미 있거나 이번에 만드는 위키 페이지에만 건다. 원본 id는 링크로 걸지 말고 \`sources\`와 본문에 글자로 적는다.
 - 사진은 원본에 붙은 것만 \`![[파일명]]\`으로 넣는다. 사진에서 보이는 내용은 사진에서 본 것이라고 밝혀 적는다.
 - 빈 파일이나 본문 없는 페이지를 만들지 않는다.
-- 끝나면 판정(\`verdict\`)과 만들거나 고친 페이지의 \`wiki/\` 기준 경로 목록(\`pages\`)을 구조화된 응답으로 돌려준다. 판정은 다음 값 중 하나다.
+- 끝나면 \`finish\` 도구로 판정(\`verdict\`)을 돌려준다. 이것이 구조화된 응답이다. 판정은 다음 값 중 하나다.
 ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
     prompt: ({ id, hasSource, photos, lastFailure }) =>
       [
@@ -47,6 +47,13 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
           : '',
         lastFailure ? `\n지난 시도는 서버 검사에서 실패해 되돌려졌다. 이유: ${lastFailure}\n같은 문제가 없도록 처음부터 다시 해라.` : '',
       ].filter(Boolean).join('\n'),
+    workspace: (domain) => `## 작업 환경
+
+- 파일은 도구로만 다룬다. \`list\`, \`read\`, \`search\`로 보고 \`write\`, \`edit\`으로 쓴다. 마지막에 \`finish\`를 한 번 부른다.
+- 경로는 도메인 폴더 \`${domain}/\` 기준이다. 원본은 \`raw/<id>.md\`, 페이지는 \`wiki/<이름>.md\`, 다른 도메인 페이지는 \`../<도메인>/wiki/<이름>.md\`다. 다른 도메인은 읽기만 한다.
+- \`write\`와 \`edit\`은 \`wiki/\` 아래 \`.md\` 파일에만 쓸 수 있다. 다른 곳에 쓰려 하면 이번 작업 전체가 실패하고 되돌려진다.
+- 있는 페이지는 \`read\`로 연 다음에 \`write\`로 바꾼다. 일부만 고칠 때는 \`edit\`을 쓴다.`,
+    nudge: '작업이 끝났으면 `finish`를 불러 판정을 돌려준다. 아직이면 도구로 계속한다.',
   },
 
   chatRules: (target) => `## 채팅 규칙

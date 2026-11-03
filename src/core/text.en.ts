@@ -33,7 +33,7 @@ ${writeScope}
 - Link with \`[[…]]\` only to wiki pages that exist or that you create in this run. Write memo ids as plain text in \`sources\` and in the body, not as links.
 - Embed only the photos attached to the memo, as \`![[file name]]\`. When a page states something you saw in a photo, say that it comes from the photo.
 - Do not create empty files or pages without a body.
-- When you finish, return a structured answer: \`verdict\`, and \`pages\`, the paths under \`wiki/\` of the pages you created or changed. \`verdict\` is one of:
+- When you are done, call the \`finish\` tool with \`verdict\`. That is your structured answer. \`verdict\` is one of:
 ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
     prompt: ({ id, hasSource, photos, lastFailure }) =>
       [
@@ -47,6 +47,13 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
           : '',
         lastFailure ? `\nThe last attempt failed the server's checks and was rolled back. Reason: ${lastFailure}\nStart over, and avoid the same problem.` : '',
       ].filter(Boolean).join('\n'),
+    workspace: (domain) => `## Workspace
+
+- You work on files only through tools: look with \`list\`, \`read\`, and \`search\`, write with \`write\` and \`edit\`, and call \`finish\` once at the end.
+- Paths are relative to the domain folder \`${domain}/\`. The memo is \`raw/<id>.md\`, pages are \`wiki/<name>.md\`, and another domain's page is \`../<domain>/wiki/<name>.md\`. Other domains are read-only.
+- \`write\` and \`edit\` work only on \`.md\` files under \`wiki/\`. Writing anywhere else fails the whole run, and every change is rolled back.
+- Open an existing page with \`read\` before you replace it with \`write\`. Use \`edit\` to change part of it.`,
+    nudge: 'If you are done, call `finish` with your verdict. If not, go on with the tools.',
   },
 
   chatRules: (target) => `## Chat rules

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseWikiPath, paths, resolvePath, ROOT, type WikiPath } from '../layout';
+import { parseWikiPath, paths, placeForJob, resolvePath, ROOT, shownPath, type WikiPath } from '../layout';
 import type { DomainName } from '../types';
 
 const 스터디 = '스터디' as DomainName;
@@ -33,4 +33,43 @@ test('every place of the folder contract is a WikiPath', () => {
   const all: WikiPath[] = Object.values(paths).map((v) => (typeof v === 'function' ? v(스터디) : v));
   assert.ok(all.length > 10);
   for (const p of [ROOT, ...all]) assert.equal(parseWikiPath(p), p, p);
+});
+
+test("a job's model may write pages under its own wiki/, add to _review.md, read what it needs, and nothing else", () => {
+  const declared = ['일상', 스터디, '미루기 아카이빙'] as DomainName[];
+  const cases: [string, string, string | null][] = [
+    ['wiki/RAG.md', 'page', '스터디/wiki/RAG.md'],
+    ['./wiki//인사이트/2026.md', 'page', '스터디/wiki/인사이트/2026.md'],
+    ['wiki/answers/2026-10-29 Q.md', 'page', '스터디/wiki/answers/2026-10-29 Q.md'],
+    [`../${NFD}/wiki/RAG.md`, 'page', '스터디/wiki/RAG.md'],
+    ['wiki/_review.md', 'review', '스터디/wiki/_review.md'],
+    ['wiki/_REVIEW.md', 'review', '스터디/wiki/_REVIEW.md'],
+    ['wiki/index.md', 'server', '스터디/wiki/index.md'],
+    ['wiki/LOG.md', 'server', '스터디/wiki/LOG.md'],
+    ['raw/01JB8ZQ4M3T9X7K2W5R6N8P001.md', 'readable', '스터디/raw/01JB8ZQ4M3T9X7K2W5R6N8P001.md'],
+    ['CLAUDE.md', 'readable', '스터디/CLAUDE.md'],
+    ['../CLAUDE.md', 'readable', 'CLAUDE.md'],
+    ['../dotoriwiki.yaml', 'readable', 'dotoriwiki.yaml'],
+    ['../_schema/공통규칙.md', 'readable', '_schema/공통규칙.md'],
+    ['../일상/wiki/ME.md', 'readable', '일상/wiki/ME.md'],
+    ['../일상/raw/x.md', 'outside', '일상/raw/x.md'],
+    ['hold/x.md', 'outside', '스터디/hold/x.md'],
+    ['../inbox/x.md', 'outside', 'inbox/x.md'],
+    ['../_originals/x.jpg', 'outside', '_originals/x.jpg'],
+    ['../없는 도메인/wiki/x.md', 'outside', '없는 도메인/wiki/x.md'],
+    ['wiki/a.txt', 'outside', '스터디/wiki/a.txt'],
+    ['wiki/.obsidian/x.md', 'outside', '스터디/wiki/.obsidian/x.md'],
+    ['wiki', 'outside', '스터디/wiki'],
+    ['..', 'outside', ''],
+    ['wiki/../../../x.md', 'outside', null],
+    ['/etc/x.md', 'outside', null],
+    ['wiki/a\\b.md', 'outside', null],
+  ];
+  for (const [target, kind, path] of cases) assert.deepEqual(placeForJob(스터디, declared, target), { kind, path }, target);
+});
+
+test('a path is shown to the model relative to its domain folder', () => {
+  assert.equal(shownPath(스터디, '스터디/wiki/RAG.md' as WikiPath), 'wiki/RAG.md');
+  assert.equal(shownPath(스터디, '일상/wiki/ME.md' as WikiPath), '../일상/wiki/ME.md');
+  assert.equal(shownPath(스터디, '스터디 2/wiki/x.md' as WikiPath), '../스터디 2/wiki/x.md');
 });

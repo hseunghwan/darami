@@ -71,3 +71,49 @@ export const paths = {
   /** The 2048 px copies pages embed. */
   attachments: p('_attachments'),
 } as const;
+
+/**
+ * What an ingest job in `domain` may do with a path its model named. Models name paths relative to
+ * the domain folder, as dotoriwiki's agents did from it as their cwd: `raw/<id>.md`, `wiki/RAG.md`,
+ * `../일상/wiki/ME.md`.
+ *
+ *   page      a `.md` under <d>/wiki/ with no dot segment, other than the three below: the model writes it
+ *   review    <d>/wiki/_review.md: the model may only add to its end
+ *   server    <d>/wiki/index.md and log.md: the model reads them, the engine writes them
+ *   readable  <d>/CLAUDE.md, <d>/raw/**, every declared domain's wiki/**, CLAUDE.md, dotoriwiki.yaml, _schema/**
+ *   outside   anything else, and what is not a path (absolute, `\`, NUL, above the root): `path` is null then
+ *
+ * The three names are matched ignoring case, because Android's storage folds case and `wiki/LOG.md`
+ * would otherwise be a page there that overwrites the ledger.
+ */
+export type JobPlace =
+  | { readonly kind: 'page' | 'review' | 'server' | 'readable'; readonly path: WikiPath }
+  | { readonly kind: 'outside'; readonly path: WikiPath | null };
+
+const SERVER_FILES = ['index.md', 'log.md'];
+
+export function placeForJob(domain: DomainName, declared: readonly DomainName[], target: string): JobPlace {
+  const path = resolvePath(paths.domain(domain), target);
+  if (path === null) return { kind: 'outside', path: null };
+  if (path === ROOT || path.split('/').some((s) => s.startsWith('.'))) return { kind: 'outside', path };
+  const wiki = `${domain}/wiki/`;
+  if (path.startsWith(wiki)) {
+    const under = path.slice(wiki.length);
+    const folded = under.toLowerCase();
+    if (SERVER_FILES.includes(folded)) return { kind: 'server', path };
+    if (folded === '_review.md') return { kind: 'review', path };
+    return folded.endsWith('.md') ? { kind: 'page', path } : { kind: 'outside', path };
+  }
+  const [top, second, ...rest] = path.split('/');
+  const readable =
+    path === paths.domainSchema(domain) ||
+    (top === domain && second === 'raw' && rest.length > 0) ||
+    (declared.includes(top as DomainName) && second === 'wiki' && rest.length > 0) ||
+    path === paths.rootSchema ||
+    path === paths.config ||
+    (top === '_schema' && second !== undefined);
+  return { kind: readable ? 'readable' : 'outside', path };
+}
+
+/** `path` as the job's model names it: relative to the domain folder, `../` for another folder. */
+export const shownPath = (domain: DomainName, path: WikiPath): string => (path.startsWith(`${domain}/`) ? path.slice(domain.length + 1) : `../${path}`);
