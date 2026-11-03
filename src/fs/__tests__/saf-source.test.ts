@@ -31,11 +31,19 @@ function calls(text: string, callee: string): { at: number; args: string[] }[] {
   });
 }
 
+/** The span of `function name(`, at any indentation, through the brace that closes it at that indentation. */
 function body(name: string): { from: number; to: number } {
-  const from = SOURCE.indexOf(`function ${name}(`);
-  assert.ok(from >= 0, name);
-  return { from, to: SOURCE.indexOf('\n}\n', from) };
+  const m = new RegExp(`^( *)(?:async )?function ${name}\\(`, 'm').exec(SOURCE);
+  assert.ok(m, name);
+  const to = SOURCE.indexOf(`\n${m[1]}}\n`, m.index);
+  assert.ok(to > m.index, name);
+  return { from: m.index, to };
 }
+
+const inside = (c: { at: number }, ...names: string[]) => names.some((n) => {
+  const b = body(n);
+  return c.at > b.from && c.at < b.to;
+});
 
 test('the scanner sees the calls it checks', () => {
   assert.ok(calls(SOURCE, 'new File').length > 0);
@@ -58,9 +66,22 @@ test('nothing calls write(), which does not truncate on SAF', () => {
   assert.deepEqual(calls(SOURCE, '\\.write'), []);
 });
 
-test('delete(), recursive on a SAF folder, is called only inside discardTwin', () => {
-  const twin = body('discardTwin');
+test('delete(), recursive on a SAF folder, is called only inside discardTwin and removeFile, which takes only a File', () => {
   const deletes = calls(SOURCE, '\\.delete');
-  assert.equal(deletes.length, 1);
-  assert.ok(deletes.every((c) => c.at > twin.from && c.at < twin.to));
+  assert.equal(deletes.length, 2);
+  assert.ok(deletes.every((c) => inside(c, 'discardTwin', 'removeFile')));
+  assert.match(SOURCE, /^function removeFile\(file: File\): void \{$/m);
+});
+
+test('createFile is called only inside makeFile, so every new file gets the twin check', () => {
+  const creates = calls(SOURCE, '\\.createFile');
+  assert.equal(creates.length, 1);
+  assert.ok(inside(creates[0]!, 'makeFile'));
+});
+
+test('open() is called only inside writeWhole, and always with FileMode.Truncate', () => {
+  const opens = calls(SOURCE, '\\.open');
+  assert.equal(opens.length, 1);
+  assert.ok(inside(opens[0]!, 'writeWhole'));
+  assert.deepEqual(opens[0]!.args, ['FileMode.Truncate']);
 });

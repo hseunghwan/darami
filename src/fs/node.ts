@@ -6,7 +6,7 @@
  * storage, checked on SAF by darami://fs-check, not something jest needs from this adapter.
  */
 
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { FolderUnreachable, type Fs } from '../core/fs';
 import { parseWikiPath, ROOT, type WikiPath } from '../core/layout';
@@ -73,6 +73,54 @@ export function nodeFs(root: string): Fs {
       if (s.size > 0 || text === '') return 'exists';
       await writeFile(at, text, { flag: 'r+' });
       return 'created';
+    },
+
+    async write(path, text) {
+      const at = full(path);
+      if (path === ROOT) throw new Error('the folder itself is not a file');
+      await rootAnswers();
+      await mkdir(dirname(at), { recursive: true });
+      if (await stat(at).then((s) => s.isDirectory(), () => false)) throw new Error(`${path} is a folder`);
+      await writeFile(at, text);
+    },
+
+    async remove(path) {
+      const at = full(path);
+      if (path === ROOT) throw new Error('the folder itself is not a file');
+      if (await stat(at).then((s) => s.isDirectory(), () => false)) throw new Error(`${path} is a folder`);
+      try {
+        await unlink(at);
+        return 'removed';
+      } catch (e) {
+        if (!absent(e)) throw e;
+        await rootAnswers();
+        return 'absent';
+      }
+    },
+
+    async listTree(dir) {
+      const at = full(dir);
+      const top = await stat(at).catch((e: unknown) => {
+        if (!absent(e)) throw e;
+        return null;
+      });
+      if (!top) {
+        await rootAnswers();
+        return [];
+      }
+      if (!top.isDirectory()) throw new Error(`${dir} is a file`);
+      const out: string[] = [];
+      const walk = async (rel: string, abs: string): Promise<void> => {
+        for (const e of await readdir(abs, { withFileTypes: true })) {
+          const name = e.name.normalize('NFC');
+          if (name.startsWith('.')) continue;
+          const child = rel === '' ? name : `${rel}/${name}`;
+          if (e.isDirectory()) await walk(child, join(abs, e.name));
+          else if (e.isFile()) out.push(child);
+        }
+      };
+      await walk(dir, at);
+      return [...new Set(out)].sort() as WikiPath[];
     },
   };
 }

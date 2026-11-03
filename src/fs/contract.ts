@@ -194,4 +194,143 @@ export const FS_CASES: readonly FsCase[] = [
       await throws(fs.list(ROOT), unreachable, 'still gone after create');
     },
   },
+  {
+    name: 'write: makes the file and its parent folders, and a long Hangul text reads back whole',
+    run: async (fs) => {
+      const long = `${'도토리 한 알, acorn one. '.repeat(4000)}\n`;
+      await fs.write(at('스터디/wiki/주제/긴 글.md'), long);
+      same(await fs.readText(at('스터디/wiki/주제/긴 글.md')), long, 'long text');
+      same(await fs.list(at('스터디/wiki')), ['주제'], 'made folders');
+    },
+  },
+  {
+    name: 'write: a shorter text over a longer one leaves only the shorter text',
+    run: async (fs, seed) => {
+      await seed.file('스터디/wiki/log.md', 'AAAAAAAAAA\n');
+      await fs.write(at('스터디/wiki/log.md'), 'B\n');
+      same(await fs.readText(at('스터디/wiki/log.md')), 'B\n', 'truncated');
+      await fs.write(at('스터디/wiki/log.md'), '# log\n## [2026-10-29] ingest | A | 새 페이지 | RAG.md\n');
+      same(await fs.readText(at('스터디/wiki/log.md')), '# log\n## [2026-10-29] ingest | A | 새 페이지 | RAG.md\n', 'longer again');
+    },
+  },
+  {
+    name: "write: '' empties a file, and the file stays",
+    run: async (fs, seed) => {
+      await seed.file('a.md', 'text\n');
+      await fs.write(at('a.md'), '');
+      same(await fs.readText(at('a.md')), '', 'empty');
+      same(await fs.list(ROOT), ['a.md'], 'kept');
+    },
+  },
+  {
+    name: 'write: leaves no renamed twin, for a new file and for one that exists',
+    run: async (fs) => {
+      await fs.write(at('inbox/a.md'), 'first\n');
+      await fs.write(at('inbox/a.md'), 'second\n');
+      same(await fs.readText(at('inbox/a.md')), 'second\n', 'replaced');
+      same(await fs.list(at('inbox')), ['a.md'], 'no twin');
+      same(await fs.list(ROOT), ['inbox'], 'no folder twin');
+    },
+  },
+  {
+    name: 'write: a folder at the path throws and keeps what it holds, and a file where a parent belongs throws',
+    run: async (fs, seed) => {
+      await seed.file('스터디/CLAUDE.md', '# 스터디\n');
+      await throws(fs.write(at('스터디'), 'x'), otherError, 'a folder');
+      same(await fs.list(at('스터디')), ['CLAUDE.md'], 'contents');
+      await throws(fs.write(at('스터디/CLAUDE.md/x.md'), 'x'), otherError, 'a file in the way');
+      same(await fs.readText(at('스터디/CLAUDE.md')), '# 스터디\n', 'the file kept');
+      same(await fs.list(ROOT), ['스터디'], 'no twin');
+    },
+  },
+  {
+    name: 'remove: removed, then readText is null and list no longer names it, and the parent stays',
+    run: async (fs, seed) => {
+      await seed.file('스터디/hold/a.md', 'a\n');
+      await seed.file('스터디/hold/b.md', 'b\n');
+      same(await fs.remove(at('스터디/hold/a.md')), 'removed', 'removed');
+      same(await fs.readText(at('스터디/hold/a.md')), null, 'gone');
+      same(await fs.list(at('스터디/hold')), ['b.md'], 'the other stays');
+      same(await fs.remove(at('스터디/hold/b.md')), 'removed', 'the last one');
+      same(await fs.list(at('스터디')), ['hold'], 'an empty parent stays');
+    },
+  },
+  {
+    name: "remove: 'absent' for a missing file and a missing parent, twice in a row",
+    run: async (fs, seed) => {
+      await seed.folder('inbox');
+      for (const n of [1, 2]) {
+        same(await fs.remove(at('inbox/a.md')), 'absent', `missing file ${n}`);
+        same(await fs.remove(at('없음/a.md')), 'absent', `missing parent ${n}`);
+      }
+    },
+  },
+  {
+    name: 'remove: a folder throws and keeps everything in it',
+    run: async (fs, seed) => {
+      await seed.file('스터디/wiki/RAG.md', 'x\n');
+      await throws(fs.remove(at('스터디/wiki')), otherError, 'a folder');
+      same(await fs.readText(at('스터디/wiki/RAG.md')), 'x\n', 'contents');
+    },
+  },
+  {
+    name: 'listTree: every file at any depth, NFC, sorted by code unit',
+    run: async (fs, seed) => {
+      await seed.file('스터디/wiki/RAG.md', 'r');
+      await seed.file('스터디/wiki/인사이트/2026.md', 'i');
+      await seed.file('스터디/wiki/answers/q.md', 'q');
+      await seed.file('스터디/wiki/주제/깊이/더 깊이/끝.md'.normalize('NFD'), 'd');
+      await seed.file('스터디/wiki/photo.jpg', 'p');
+      await seed.folder('스터디/wiki/비어 있음');
+      same(await fs.listTree(at('스터디/wiki')), [
+        '스터디/wiki/RAG.md', '스터디/wiki/answers/q.md', '스터디/wiki/photo.jpg', '스터디/wiki/인사이트/2026.md', '스터디/wiki/주제/깊이/더 깊이/끝.md',
+      ], 'tree');
+      same(await fs.listTree(ROOT), await fs.listTree(at('스터디')), 'the root lists the same files');
+    },
+  },
+  {
+    name: 'listTree: dot files and dot folders are skipped',
+    run: async (fs, seed) => {
+      await seed.file('wiki/.obsidian/app.json', '{}');
+      await seed.file('wiki/.trash/old.md', 'x');
+      await seed.file('wiki/.gitkeep', '');
+      await seed.file('wiki/answers/.gitkeep', '');
+      await seed.file('wiki/a.md', 'a');
+      same(await fs.listTree(at('wiki')), ['wiki/a.md'], 'tree');
+    },
+  },
+  {
+    name: 'listTree: [] for a missing folder, and a file throws',
+    run: async (fs, seed) => {
+      await seed.file('CLAUDE.md', '# root\n');
+      same(await fs.listTree(at('없음')), [], 'missing');
+      same(await fs.listTree(at('없음/더 깊이')), [], 'missing parent');
+      await throws(fs.listTree(at('CLAUDE.md')), otherError, 'a file');
+    },
+  },
+  {
+    name: 'write, remove, and listTree refuse a path that breaks the WikiPath rule, and write and remove refuse the root',
+    run: async (fs) => {
+      for (const bad of ['../x', '/x', 'a//b', 'a/', 'a\\b', './a', '스터디'.normalize('NFD')]) {
+        await throws(fs.write(at(bad), 'x'), badPath, `write ${JSON.stringify(bad)}`);
+        await throws(fs.remove(at(bad)), badPath, `remove ${JSON.stringify(bad)}`);
+        await throws(fs.listTree(at(bad)), badPath, `listTree ${JSON.stringify(bad)}`);
+      }
+      await throws(fs.write(ROOT, 'x'), otherError, 'write the root');
+      await throws(fs.remove(ROOT), otherError, 'remove the root');
+    },
+  },
+  {
+    name: 'FolderUnreachable: write, remove, and listTree throw it once the folder is gone, and write makes nothing',
+    run: async (fs, seed) => {
+      await seed.file('CLAUDE.md', '# root\n');
+      await seed.dropRoot();
+      await throws(fs.write(at('스터디/wiki/a.md'), 'x'), unreachable, 'write');
+      await throws(fs.write(at('CLAUDE.md'), 'x'), unreachable, 'write over');
+      await throws(fs.remove(at('CLAUDE.md')), unreachable, 'remove');
+      await throws(fs.listTree(ROOT), unreachable, 'listTree');
+      await throws(fs.listTree(at('스터디')), unreachable, 'listTree under');
+      await throws(fs.list(ROOT), unreachable, 'still gone after write');
+    },
+  },
 ];
