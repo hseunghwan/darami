@@ -16,7 +16,8 @@ import { textFor, type Text } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { composeSystemPrompt, readLedger } from '../core/wiki';
 import { runAgent } from '../agent/loop';
-import type { Ctx, Engine, JobRef, RunReport } from './engine';
+import type { Fs } from '../core/fs';
+import type { Ctx, Engine, JobRef, Pass, RunReport } from './engine';
 import { memoFile } from './memos';
 import type { JobTx } from './transaction';
 import { jobWorkspace } from './workspace';
@@ -28,7 +29,7 @@ type Candidate =
 const byOrder = (a: Candidate, b: Candidate) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0);
 const under = (d: DomainName, files: readonly WikiPath[]) => files.map((f) => f.slice(`${paths.wiki(d)}/`.length));
 
-export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<void>): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void> } {
+export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName, pass?: Pass) => Promise<void>): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void> } {
   const { fs } = ctx;
 
   /** The pages and answers under wiki/ as they are now, for index.md. */
@@ -48,8 +49,8 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<voi
     if (!(await fs.readText(paths.index(dc.name)))) await fs.create(paths.index(dc.name), await indexOf(dc, t));
   }
 
-  /** Answers first (no model, and someone is waiting), then memos; each group oldest first. */
-  async function candidates(config: WikiConfig, d: DomainName, ledger: Ledger): Promise<readonly Candidate[]> {
+  /** Answers first (no model, and someone is waiting), then memos; each group oldest first. `names` lists raw/. */
+  async function candidates(config: WikiConfig, d: DomainName, ledger: Ledger, names: Fs): Promise<readonly Candidate[]> {
     const domains = [...config.domains.keys()];
     const answers: Candidate[] = [];
     for (const name of await fs.list(paths.answersInbox(d))) {
@@ -67,7 +68,7 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<voi
       answers.push({ kind: 'file-answer', ref: { kind: 'file-answer', domain: d, id }, order: orderKey(s.askedAt, id), staging, filing });
     }
     const memos: Candidate[] = [];
-    for (const name of await fs.list(paths.raw(d))) {
+    for (const name of await names.list(paths.raw(d))) {
       const id = name.endsWith('.md') && !name.endsWith('.source.md') ? parseMemoId(name.slice(0, -3)) : null;
       if (!id || `${id}.md` !== name || ledger.history('ingest', id).terminal) continue;
       // A copy that does not parse is a write cut off part way; the router or the move that made it finishes it.
@@ -127,9 +128,10 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<voi
         const t = textFor(config.locale);
         await ensureDomain(dc, t);
         await ctx.journal.recover(d);
-        await finishMoves(d);
-        const ledger = await readLedger(fs, d);
-        const picked = (await candidates(config, d, ledger)).find((j) => opts.withModel || j.kind === 'file-answer');
+        await finishMoves(d, opts.pass);
+        const seen = opts.pass ? ctx.book.passFs(opts.pass) : fs;
+        const ledger = await readLedger(seen, d);
+        const picked = (await candidates(config, d, ledger, seen)).find((j) => opts.withModel || j.kind === 'file-answer');
         if (!picked) return { kind: 'idle' };
         const history = ledger.history(picked.ref.kind, picked.ref.id);
         const tx = await ctx.journal.beginJob(d, { kind: picked.ref.kind, id: picked.ref.id, attempt: history.attempts + 1 });
