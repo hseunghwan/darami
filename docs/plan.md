@@ -83,6 +83,29 @@ Checked on 2026-11-03 under jest on Node 24.
 - P3 must keep reading what dotoriwiki wrote: `gateway stopped mid-job`, the reason on an interrupted attempt in log.md, the ledger words, the memo link labels, the problem rule names, and the `lint` job kind.
 - `check()` takes no git words. P3 fills `changes` from the loop's record of its writes, as added, modified, or deleted, and `reviewBefore` from `_review.md` as it was when the job started.
 
+## What P2 found
+
+Checked on 2026-11-03 on the Android 16 emulator, with expo-file-system 58.0.13 and the external storage provider. A throwaway probe screen measured SAF first. Then `darami://fs-check` ran `src/fs/contract.ts` on SAF and passed 17 of 17 cases.
+
+- A child built with `new File(dir, name)` resolves to the picked folder itself, without an error. The adapter builds each document URI from the tree id. This works only for `com.android.externalstorage.documents`, whose ids are `<volume>:<path>`. A folder from any other provider is refused when it is picked.
+- `createFile` never fails on a clash. It renames the new file to `c.md (1)`, and it does the same for `C.md` next to `c.md`, because lookups ignore case. Lookups also ignore Unicode normalization: an NFC path finds an NFD name. `list()` returns names as stored, and the adapter turns them into NFC.
+- A `null` MIME type turns `a.md` into `a.md.txt`. `application/octet-stream` keeps every name exactly.
+- `write()` does not truncate. Writing `B` over `AAAAAAAAAA` gives `BAAAAAAAAA`. The adapter writes only through a handle opened with `FileMode.Truncate`.
+- `File.delete()` on a folder deletes everything in it, and `rename()` throws. SAF therefore has no temp-then-rename write. The port's contract no longer promises atomic writes. `create` treats an empty file as a create cut off before its write and fills it.
+- A revoked grant answers `exists` false and `list()` `[]`. Every method checks the root before it answers "nothing there", and throws `FolderUnreachable` when the root is gone.
+- The grant survives `am force-stop` and a relaunch.
+- Timing on the emulator: a file read takes about 19 ms, an existence check about 4 ms, and a walk of the 50 entries in `made-by-dotoriwiki` 682 ms. P3's search tool will likely need an index.
+- Hermes gives the same results as Node for every check P1 listed: `/\p{Cc}/u`, `Intl` with `longOffset`, `validTz`, `localeCompare(…, 'ko')`, `normalize`, `TextEncoder`, and `new URL` in `trimUrl`. The emulator's own time zone is `GMT`, so a preset written there gets `time_zone: GMT`.
+- On the emulator:
+  - An empty folder holding only `.stfolder` got the 17 preset files, with `gitignore` renamed to `.gitignore` and no `(1)` or `.txt` names.
+  - A copy of `made-by-dotoriwiki` showed its three domains and one `model_profile` warning, and its 37 files had the same hashes before and after.
+  - A folder with other files was refused.
+  - A half-written preset, with an emptied `CLAUDE.md` and a missing domain, was finished. The files already there were kept.
+- Open for P3. `write` cannot replace a file through a temp file and a rename on SAF. It has two options. One is truncate-and-write guarded by the loop's reread before an edit. The other is a native `DocumentsContract.renameDocument` module, which needs one native build.
+- Open risk. SD cards were not measured. If an SD card does not ignore normalization, an NFD name there needs a listing fallback.
+- In a dev build, the LogBox warning banner sits over the bottom buttons and takes their taps. Tap the banner once to clear it before driving those buttons from adb.
+- A Windows checkout with `core.autocrlf=true` writes CRLF into `presets/` and the fixtures. Files pushed from it to the emulator differ from the repository's bytes.
+
 ## Shape
 
 ```
