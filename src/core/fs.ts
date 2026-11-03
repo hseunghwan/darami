@@ -1,13 +1,22 @@
 /**
  * The Fs port: the wiki folder as the engine sees it. One Fs is bound to one folder, a SAF tree on
- * the phone or a directory under jest (src/fs/node.ts).
+ * the phone (src/fs/saf.ts) or a directory under jest (src/fs/node.ts).
  *
- * The contract, for this method and every later one:
- * - Paths are WikiPaths (layout.ts), so they are relative, NFC, and cannot leave the folder. An
- *   adapter whose storage can hold another normalization, such as a name synced from a Mac as NFD,
- *   finds the entry whose NFC form matches.
- * - Absence is a value. Anything else throws: a revoked permission, an I/O error, a folder where a
- *   file was expected. The engine catches none of it.
+ * The contract, for these methods and every later one. src/fs/contract.ts is its executable form:
+ * jest runs it on the node adapter, and darami://fs-check runs it on SAF on a device.
+ * - Paths are WikiPaths (layout.ts), so they are relative, NFC, and cannot leave the folder. Names
+ *   an Fs returns are NFC.
+ * - Names compare the way the storage compares them. Android's shared storage folds case and
+ *   normalization (`HELLO.md` finds `hello.md`); node on Linux does not. Core never makes two names
+ *   that differ only in case or normalization.
+ * - Absence is a value only while the folder answers. When the bound folder itself is gone or its
+ *   grant was revoked, every method throws FolderUnreachable, because SAF reports a revoked tree as
+ *   "nothing there" and the engine would otherwise read it as an empty folder.
+ * - Anything else throws: an I/O error, a folder where a file was expected, a file where a folder
+ *   was expected. The engine catches none of it, FolderUnreachable aside.
+ * - Nothing is atomic. SAF has no rename, so a file cannot appear whole at once: a reader or a
+ *   crash can see a file that is empty or partly written. create only writes into a file it made
+ *   or one that was empty, so a crash never mixes two texts.
  * - Async, because SAF answers over a binder call.
  *
  * A method joins the port with the phase whose code first calls it, so no method's semantics are
@@ -16,7 +25,36 @@
 
 import type { WikiPath } from './layout';
 
+/** The folder this Fs is bound to does not answer: deleted, moved, on a removed card, or its grant revoked. */
+export class FolderUnreachable extends Error {
+  constructor(detail: string) {
+    super(`the wiki folder cannot be reached: ${detail}`);
+    this.name = 'FolderUnreachable';
+  }
+}
+
 export type Fs = {
   /** The file's text decoded as UTF-8, exactly as stored (a BOM and CRLF kept). null when no file is there, a missing parent included. Throws on a folder. */
   readText(path: WikiPath): Promise<string | null>;
+
+  /**
+   * The names directly in `dir`, files and folders alike: NFC, distinct, sorted by UTF-16 code
+   * unit, dot names included (core decides what a dot name means). `[]` when `dir` is missing.
+   * Throws when `dir` is a file.
+   */
+  list(dir: WikiPath): Promise<readonly string[]>;
+
+  /**
+   * Makes the file `path` holding `text`, making missing parent folders on the way. Never replaces
+   * text:
+   * - 'created': no file was there, or an empty one was, and it now holds all of `text`. An empty
+   *   file counts as missing because it is what a create cut off between making the file and
+   *   writing it leaves, so a rerun finishes the job.
+   * - 'exists': a file with at least one byte is at `path`, or an empty one is and `text` is ''.
+   *   It is left as it was.
+   * Throws on a folder at `path`, a file where a parent folder should be, and ROOT. Leaves no
+   * renamed twin (`x.md (1)`) behind, whatever the storage does on a clash. Resolves only after the
+   * last byte is written.
+   */
+  create(path: WikiPath, text: string): Promise<'created' | 'exists'>;
 };
