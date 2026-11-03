@@ -48,6 +48,41 @@ Checked on 2026-11-03, from Node on the Mac and from the app on an Android 16 em
 - A bad token gets a 401 with a `detail` message. Rate limits were not hit, so their handling (`Retry-After`, then `resets_in_seconds`, then five minutes) is a guess until a real 429 is recorded.
 - Never test a refresh with the tokens of a logged-in Codex CLI. A refresh token works once, so the CLI's login would break.
 
+## What P1 found
+
+Checked on 2026-11-03 under jest on Node 24.
+
+- The engine in `src/core/` is dotoriwiki's formats and rules: config, ledger, pages, sources, text, the memo-file half of photos, and the path shapes. None of dotoriwiki's `WikiImpl` came along. Routing, jobs, held memos, the ledger append, index.md writing, and rollback are P3's to rebuild.
+- The Fs port has one method, `readText`, which returns `null` when no file is there and throws on anything else, a folder included. Paths are `WikiPath`s, which only `layout.ts` makes, so an adapter never sees `..`. `src/core/wiki.ts` is the only caller. A method joins the port with the phase that first calls it:
+
+| Method | First caller | What it must keep |
+| --- | --- | --- |
+| `list(dir)` | P2, to see whether the picked folder is empty. P3, for memo ids | NFC names, sorted, `[]` when the folder is missing. Core drops dot names, so `.stfolder` and `.obsidian/` stay invisible |
+| `create(path, text)` returning `'created'` or `'exists'` | P2, to copy a preset. P3, to accept, route, and stage answers | Never overwrites. SAF's `createFile` renames on a clash to `x (1).md`, so the adapter checks the name it got and undoes a rename |
+| `write(path, text)` | P3, for index.md and pages | Replaces the whole file through a temp file. A crash leaves the old text or the new, never a mix |
+| `append(path, text)` | P3, for log.md | Adds whole lines |
+| `remove(path)` | P3, to release a held memo | Does nothing when the file is absent |
+| `listTree(dir)` | P3, for index.md and check()'s page names | `.md` paths under `dir`, NFC, sorted, dot segments dropped |
+| `readBytes`, `writeBytes` | P6, for photos | |
+
+- The port's contract says an adapter finds an NFD name on disk by its NFC path. The node adapter does not, because jest's fixtures are NFC. P2's SAF adapter must, for a folder synced from a Mac.
+- `npm run typecheck` runs two programs. `tsconfig.app.json` is what the phone ships, with no ambient types, so `Buffer` in a core file and an app import of `src/fs/node` both fail it with TS2591. `tsconfig.json` is the whole repo with jest and node types. `src/core/__tests__/boundary.test.ts` checks what tsc cannot: core imports only itself and `yaml`, and uses no `import.meta`, `require`, or `process`.
+- `yaml` is pinned to 2.9.1, dotoriwiki's version, because memo and page frontmatter is its `stringify` output. Under jest-expo it resolves to `dist/index.js` and runs with no `moduleNameMapper`. Metro should take `browser/`, the ESM build of the same source. P2's first device run confirms it.
+- `node:assert/strict`'s `deepEqual` checks prototypes, and under jest an array from a Node built-in such as `readdirSync` is not the test's `Array`. Equal contents still fail. Copy such a value into a new array before comparing it.
+- `src/core/__tests__/fixtures/made-by-dotoriwiki/` is a wiki dotoriwiki 91f0aac wrote, with feed, agent, photo, moved, held, and answer memos. `compat.test.ts` reads it back byte for byte. `scripts/make-dotoriwiki-fixture.ts <dotoriwiki-checkout>` makes it again, by hand, under Node 24.
+- An `@` import in a CLAUDE.md that leaves the wiki folder, an absolute path included, now keeps its line as written. dotoriwiki inlined it from anywhere on the Mac.
+- Config messages are dotoriwiki's words, so a few still say "gateway" or `models.json`. They change when P3 decides what `model_profile` names on the phone.
+- P2's first emulator run must check what Hermes does with these, since jest ran them on Node's full ICU:
+  - `/\p{Cc}/u` in config.ts's domain name check
+  - `Intl.DateTimeFormat` with `timeZoneName: 'longOffset'` in `isoWithOffset`
+  - `validTz`, which relies on `Intl` throwing for an unknown zone
+  - `localeCompare(…, 'ko')` in `renderIndex`, where another order means index.md bytes that differ from dotoriwiki's
+  - `String.prototype.normalize`
+  - `TextEncoder` in `utf8Length`
+  - `new URL` in `trimUrl`, since React Native's URL polyfill may accept links Node rejects
+- P3 must keep reading what dotoriwiki wrote: `gateway stopped mid-job`, the reason on an interrupted attempt in log.md, the ledger words, the memo link labels, the problem rule names, and the `lint` job kind.
+- `check()` takes no git words. P3 fills `changes` from the loop's record of its writes, as added, modified, or deleted, and `reviewBefore` from `_review.md` as it was when the job started.
+
 ## Shape
 
 ```
@@ -72,7 +107,7 @@ Each phase ends in a check. A later phase starts only after the earlier one pass
 | Phase | Change | Check |
 | --- | --- | --- |
 | P0 | Spike in `src/codex/`: device-code login, token storage in SecureStore, refresh, one classify call, and one tool-call round trip against the Codex endpoint. Record the request shape it accepts and the real error bodies for 401, 429, and an unknown model. | On the emulator: log in, classify a memo, and see one function call and its result go back and forth. If the endpoint refuses a non-Codex client, stop here and decide again with the user. |
-| P1 | Port dotoriwiki's `src/wiki/` to `src/core/` behind an Fs port. Drop git, the file watcher, and the manual-edit commits. Port the tests that cover config, ledger, pages, sources, and text. | The ported tests pass under jest with the node Fs adapter, and they read the presets and `test/fixture/` wikis unchanged. |
+| P1 | Port dotoriwiki's `src/wiki/` to `src/core/` behind an Fs port. Drop git, the file watcher, and the manual-edit commits. Port the tests that cover config, ledger, pages, sources, and text. | The ported tests pass under jest with the node Fs adapter, and they read the presets and the dotoriwiki wikis in `src/core/__tests__/fixtures/` unchanged. |
 | P2 | The SAF Fs adapter. Onboarding asks for the folder, writes a preset if it is empty, and opens a wiki that is already there. The folder URI is saved. | On the emulator: pick an empty folder and get the preset. Pick a copy of a wiki dotoriwiki made and see its domains. A file manager shows the files. |
 | P3 | The agent loop and the job queue: classify, hold, ingest with the ledger line, retries, and the unavailable states for rate limits and expired logins. | Unit tests with a fake model, including the confinement case. On the emulator, a typed memo lands in its domain's `wiki/` with one `log.md` line. |
 | P4 | Rewire the screens: compose, activity, memo detail, held, and settings read the local queue and the wiki. Delete pairing, the outbox, and the gateway client. Settings show the login and the folder. | App tests pass. On the emulator the whole flow works with the network on, and a memo sent offline waits and is filed when the network returns. |
