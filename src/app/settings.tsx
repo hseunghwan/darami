@@ -1,12 +1,12 @@
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
-import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { outbox } from '../lib/db';
 import type { OutboxRow } from '../lib/outbox';
 import type { MemoRequest } from '../lib/wire';
-import { flushNow, refreshStatus, updateSettings, useApp, type ThemePref } from '../state';
+import { flushNow, recheckFolder, refreshStatus, updateSettings, useApp, type Folder, type ThemePref } from '../state';
 import { useOutbox } from '../ui/hooks';
 import { Card, Header, Screen, SectionTitle, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
@@ -26,6 +26,21 @@ function Row({ label, children, last, style }: { label: string; children?: React
       {children}
     </View>
   );
+}
+
+function folderStatus(folder: Folder): string {
+  const s = folder.state;
+  if (s === null) return copy.folder.status.checking;
+  switch (s.kind) {
+    case 'wiki':
+      return copy.folder.status.wiki(s.config.domains.size);
+    case 'broken':
+      return copy.folder.status.broken;
+    case 'unreachable':
+      return copy.folder.status.unreachable;
+    default:
+      return copy.folder.status.notWiki;
+  }
 }
 
 function Switch({ on, onToggle, label }: { on: boolean; onToggle: () => void; label: string }) {
@@ -73,10 +88,18 @@ export default function Settings() {
   const pairing = useApp((a) => a.pairing);
   const reachable = useApp((a) => a.reachable);
   const settings = useApp((a) => a.settings);
+  const folder = useApp((a) => a.folder);
   const rows = useOutbox();
   const [checking, setChecking] = useState(false);
   const queued = rows.filter((r) => r.state === 'queued');
   const dead = rows.filter((r) => r.state === 'dead');
+
+  // A fix made in Obsidian or a file manager shows when the user comes back here.
+  useFocusEffect(
+    useCallback(() => {
+      void recheckFolder();
+    }, []),
+  );
 
   async function toggleLocation() {
     if (settings.location) return updateSettings({ location: false });
@@ -94,6 +117,28 @@ export default function Settings() {
     <Screen>
       <Header title={copy.common.settings} back />
       <ScrollView contentContainerStyle={st.main}>
+        <View style={st.section}>
+          <SectionTitle style={st.h2}>{copy.folder.label}</SectionTitle>
+          <Card>
+            <Row label={copy.folder.name}>
+              <Text numberOfLines={1} style={{ flexShrink: 1, color: t.muted, fontSize: 14 }}>{folder?.tree.name ?? copy.folder.none}</Text>
+            </Row>
+            {folder && (
+              <Row label={copy.settings.status}>
+                <Text style={{ flexShrink: 1, color: folder.state && folder.state.kind !== 'wiki' ? t.warn : t.muted, fontSize: 14 }}>{folderStatus(folder)}</Text>
+              </Row>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copy.folder.change}
+              onPress={() => router.push({ pathname: '/onboarding', params: { repair: 'folder' } })}
+              style={st.action}
+            >
+              <Text style={{ color: t.link, fontSize: 14 }}>{copy.folder.change}</Text>
+            </Pressable>
+          </Card>
+        </View>
+
         <View style={st.section}>
           <SectionTitle style={st.h2}>{copy.settings.connection}</SectionTitle>
           <Card>
