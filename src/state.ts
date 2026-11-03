@@ -10,7 +10,8 @@ import type { DomainName, MemoId } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { phoneModel } from './agent/codex';
 import { MODEL_PROFILES } from './agent/model';
-import { loadSession } from './codex/session';
+import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
+import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
 import { parseSafTree, type SafTree } from './fs/saf-uri';
 import { buildMemoRequest, type CaptureInput, type GeoFix } from './lib/capture';
@@ -220,6 +221,40 @@ let refused = false;
 async function readLogin(): Promise<void> {
   set({ login: loginOf(await loadSession(), refused) });
 }
+
+export type LoginEnd = { readonly ok: true } | { readonly ok: false; readonly failure: AuthFailure };
+export type LoginStart =
+  | { readonly ok: true; readonly code: DeviceCode; readonly done: Promise<LoginEnd>; readonly cancel: () => void }
+  | { readonly ok: false; readonly failure: AuthFailure };
+
+/** A device code to show, then the login finishing in the background once the user approves it. */
+export async function startLogin(): Promise<LoginStart> {
+  const c = await requestDeviceCode(fetch);
+  if (!c.ok) return c;
+  // The emulator run reads the code from logcat.
+  if (__DEV__) console.log(`LOGIN code ${c.value.userCode}`);
+  const abort = new AbortController();
+  const done = (async (): Promise<LoginEnd> => {
+    const r = await completeDeviceLogin(fetch, c.value, { signal: abort.signal });
+    if (!r.ok) return r;
+    await saveTokens(r.value);
+    refused = false;
+    set({ login: { kind: 'in', email: r.value.email, plan: r.value.plan } });
+    void runner.loggedIn();
+    return { ok: true };
+  })();
+  return { ok: true, code: c.value, done, cancel: () => abort.abort() };
+}
+
+/** The gate then opens the login step. */
+export async function logOut(): Promise<void> {
+  await forgetLogin();
+  refused = false;
+  set({ login: { kind: 'out' } });
+}
+
+/** Settings' File now: ends a network or server pause and runs a pass. A usage limit keeps its wait. */
+export const fileNow = (): Promise<void> => runner.networkBack();
 
 const isLoginPause = (r: RunnerReport) => (r.where === 'router' || r.where === 'domain') && r.kind === 'unavailable' && r.unavailable.cause === 'login';
 

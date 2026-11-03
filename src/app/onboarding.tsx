@@ -1,59 +1,36 @@
-import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { gateway } from '../lib/gateway';
-import { pairingFailureCopy, parseManual, parseQr, type Candidate, type PairingFailure, type PairingMode } from '../lib/pairing';
-import { pair, updateSettings, useApp } from '../state';
+import { useEffect, useRef, useState } from 'react';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { AuthFailure, DeviceCode } from '../codex/auth';
+import { loginFailureText } from '../lib/login';
+import { firstStep, nextStep, parseRepair, STEPS, type Step } from '../lib/onboarding';
+import { startLogin, updateSettings, useApp } from '../state';
 import { FolderStep } from '../ui/folder-step';
 import { Icon } from '../ui/icon';
-import { Card, Notice, PrimaryButton, QuietButton, Screen } from '../ui/parts';
+import { Card, Notice, PrimaryButton, QuietButton, Screen, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
 import { copy } from '../text';
 
-type Connect = {
-  mode: PairingMode;
-  checking: boolean;
-  failure: PairingFailure | null;
-  /** Domain names once GET /status answered. */
-  connected: string[] | null;
-};
-
-/** P4 replaces 'connect' with the login. */
-const STEPS = ['folder', 'connect', 'location', 'done'] as const;
-type Step = (typeof STEPS)[number];
-
-/** `?repair=folder` runs the folder step alone; any other repair is the gateway's. */
-const firstStep = (repair: string | undefined): Step => (repair === undefined || repair === 'folder' ? 'folder' : 'connect');
-
 export default function Onboarding() {
   const t = useTheme();
-  const { repair } = useLocalSearchParams<{ repair?: string }>();
-  const [step, setStep] = useState<Step>(() => firstStep(repair));
-  const [connect, setConnect] = useState<Connect>({ mode: 'qr', checking: false, failure: null, connected: null });
+  const repair = parseRepair(useLocalSearchParams<{ repair?: string }>().repair);
+  const login = useApp((a) => a.login);
+  const [step, setStep] = useState<Step>(() => firstStep(repair, login));
   const location = useApp((a) => a.settings.location);
 
-  async function check(candidate: Candidate | null, mode: PairingMode) {
-    if (!candidate) return setConnect({ mode, checking: false, failure: 'invalid', connected: null });
-    setConnect({ mode, checking: true, failure: null, connected: null });
-    const r = await gateway.check(candidate);
-    if (!r.ok) return setConnect({ mode, checking: false, failure: r.failure, connected: null });
-    await pair(r.pairing, r.status);
-    setConnect({ mode, checking: false, failure: null, connected: Object.keys(r.status.domains) });
-  }
-
   function next() {
-    if (repair) {
-      if (router.canGoBack()) router.back();
-      else router.replace('/');
-    } else setStep(STEPS[STEPS.indexOf(step) + 1]!);
+    const to = nextStep(step, repair);
+    if (to) return setStep(to);
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
   }
 
   async function chooseLocation(allow: boolean) {
     const granted = allow && (await Location.requestForegroundPermissionsAsync()).granted;
     await updateSettings({ location: granted });
-    setStep('done');
+    next();
   }
 
   const index = STEPS.indexOf(step);
@@ -66,148 +43,96 @@ export default function Onboarding() {
           ))}
         </View>
       )}
-      {step === 'folder' && <FolderStep repair={!!repair} onDone={next} />}
-      {step === 'connect' && (
-        <ConnectStep state={connect} repair={repair ?? null} onCheck={check} onMode={(mode) => setConnect({ mode, checking: false, failure: null, connected: null })} onNext={next} />
-      )}
+      {step === 'login' && <LoginStep repair={repair === 'login'} onDone={next} />}
+      {step === 'folder' && <FolderStep repair={repair === 'folder'} onDone={next} />}
       {step === 'location' && <LocationStep onChoose={chooseLocation} />}
       {step === 'done' && <DoneStep location={location} />}
     </Screen>
   );
 }
 
-function ConnectStep(props: {
-  state: Connect;
-  repair: string | null;
-  onCheck: (c: Candidate | null, mode: PairingMode) => void;
-  onMode: (m: PairingMode) => void;
-  onNext: () => void;
-}) {
+type Attempt =
+  | { readonly kind: 'start' }
+  | { readonly kind: 'asking' }
+  | { readonly kind: 'code'; readonly code: DeviceCode; readonly cancel: () => void }
+  | { readonly kind: 'failed'; readonly failure: AuthFailure };
+
+/** A device code to type on the ChatGPT page, then the wait for approval. Leaving the step stops the wait. */
+function LoginStep({ repair, onDone }: { repair: boolean; onDone: () => void }) {
   const t = useTheme();
-  const { mode, checking, failure, connected } = props.state;
-  const [addr, setAddr] = useState('');
-  const [token, setToken] = useState('');
-  const lede =
-    props.repair === '401'
-      ? copy.onboarding.repairLede
-      : copy.onboarding.lede;
+  const login = useApp((a) => a.login);
+  const [attempt, setAttempt] = useState<Attempt>({ kind: 'start' });
+  const live = useRef<(() => void) | null>(null);
+  useEffect(() => () => live.current?.(), []);
 
-  return (
-    <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={st.main} keyboardShouldPersistTaps="handled">
-        <View style={{ gap: 8 }}>
-          <Text style={[st.title, { color: t.fg }]}>{props.repair ? copy.onboarding.repairTitle : copy.onboarding.title}</Text>
-          <Text style={[st.lede, { color: t.muted }]}>{lede}</Text>
-        </View>
-
-        {!connected && mode === 'qr' && <QrView checking={checking} onScan={(data) => props.onCheck(parseQr(data), 'qr')} />}
-
-        {!connected && mode === 'manual' && (
-          <View style={{ gap: 16 }}>
-            <Field label={copy.onboarding.address} value={addr} onChange={setAddr} placeholder="my-computer.tail-xxxx.ts.net:8787" keyboardType="url" />
-            <Field label={copy.onboarding.token} value={token} onChange={setToken} placeholder={copy.onboarding.tokenPlaceholder} secure onSubmit={() => !checking && props.onCheck(parseManual(addr, token), 'manual')} />
-          </View>
-        )}
-
-        {connected && (
-          <Notice tone="ok">
-            <View accessibilityRole="text" style={st.row8}>
-              <Icon name="checkCircle" size={18} color={t.okFg} />
-              <Text style={{ color: t.okFg, fontSize: 14, fontWeight: '500' }}>{copy.onboarding.found(connected.length)}</Text>
-            </View>
-            <View style={st.wrap6}>
-              {connected.map((d) => (
-                <View key={d} style={[st.tag, { backgroundColor: t.bg2 }]}>
-                  <Text style={{ color: t.muted, fontSize: 12 }}>{d}</Text>
-                </View>
-              ))}
-            </View>
-          </Notice>
-        )}
-
-        {failure && (
-          <Notice tone="bad">
-            <View accessibilityRole="alert" style={st.row8top}>
-              <Icon name="alert" size={18} color={t.bad} />
-              <Text style={{ flex: 1, color: t.bad, fontSize: 14, lineHeight: 21 }}>{pairingFailureCopy(mode, failure)}</Text>
-            </View>
-          </Notice>
-        )}
-
-        <View style={{ flex: 1 }} />
-
-        {!connected && mode === 'qr' && <QuietButton label={copy.onboarding.manual} onPress={() => props.onMode('manual')} />}
-        {!connected && mode === 'manual' && (
-          <View style={{ gap: 8 }}>
-            <PrimaryButton
-              tall
-              label={checking ? copy.common.checking : copy.onboarding.check}
-              busy={checking}
-              disabled={addr.trim() === '' || token.trim() === ''}
-              onPress={() => props.onCheck(parseManual(addr, token), 'manual')}
-            />
-            <QuietButton label={copy.onboarding.useQr} onPress={() => props.onMode('qr')} />
-          </View>
-        )}
-        {connected && <PrimaryButton tall label={props.repair ? copy.onboarding.done : copy.onboarding.next} onPress={props.onNext} />}
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
-}
-
-function QrView({ checking, onScan }: { checking: boolean; onScan: (data: string) => void }) {
-  const [permission, requestPermission] = useCameraPermissions();
-  const last = useRef<{ data: string; at: number } | null>(null);
-  const live = permission?.granted === true;
-
-  function scanned(r: BarcodeScanningResult) {
-    if (checking || (r.data === last.current?.data && Date.now() - last.current.at < 4_000)) return;
-    last.current = { data: r.data, at: Date.now() };
-    onScan(r.data);
+  async function begin() {
+    setAttempt({ kind: 'asking' });
+    const r = await startLogin();
+    if (!r.ok) return setAttempt({ kind: 'failed', failure: r.failure });
+    live.current = r.cancel;
+    setAttempt({ kind: 'code', code: r.code, cancel: r.cancel });
+    const end = await r.done;
+    live.current = null;
+    setAttempt(end.ok || end.failure.kind === 'cancelled' ? { kind: 'start' } : { kind: 'failed', failure: end.failure });
   }
 
+  const loggedIn = login.kind === 'in' && attempt.kind !== 'code' && attempt.kind !== 'asking';
+  const failure = attempt.kind === 'failed' ? loginFailureText(attempt.failure) : null;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={copy.onboarding.scanQr} onPress={live ? undefined : requestPermission} style={st.qr}>
-      {live && <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned} />}
-      <View style={st.frame}>
-        <View style={[st.corner, { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 10 }]} />
-        <View style={[st.corner, { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 10 }]} />
-        <View style={[st.corner, { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 10 }]} />
-        <View style={[st.corner, { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 10 }]} />
+    <ScrollView contentContainerStyle={st.main}>
+      <View style={{ gap: 8 }}>
+        <Text style={[st.title, { color: t.fg }]}>{repair ? copy.login.repairTitle : copy.login.title}</Text>
+        <Text style={[st.lede, { color: t.muted }]}>{repair ? copy.login.repairLede : copy.login.lede}</Text>
       </View>
-      <Text style={st.qrLabel}>{checking ? copy.onboarding.reading : live ? copy.onboarding.aimQr : copy.onboarding.tapForCamera}</Text>
-    </Pressable>
-  );
-}
 
-function Field(props: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  keyboardType?: 'url';
-  secure?: boolean;
-  onSubmit?: () => void;
-}) {
-  const t = useTheme();
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={{ color: t.muted, fontSize: 13, fontWeight: '500' }}>{props.label}</Text>
-      <TextInput
-        accessibilityLabel={props.label}
-        value={props.value}
-        onChangeText={props.onChange}
-        placeholder={props.placeholder}
-        placeholderTextColor={t.faint}
-        keyboardType={props.keyboardType ?? 'default'}
-        secureTextEntry={props.secure}
-        onSubmitEditing={props.onSubmit}
-        returnKeyType={props.onSubmit ? 'go' : 'next'}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={[st.input, { borderColor: t.line2, backgroundColor: t.bg2, color: t.fg }]}
-      />
-    </View>
+      {loggedIn && (
+        <Notice tone="ok">
+          <View accessibilityRole="text" style={st.row8}>
+            <Icon name="checkCircle" size={18} color={t.okFg} />
+            <Text style={{ flex: 1, color: t.okFg, fontSize: 14, fontWeight: '500' }}>{copy.login.loggedIn(login.email, login.plan)}</Text>
+          </View>
+        </Notice>
+      )}
+
+      {attempt.kind === 'code' && (
+        <Card style={{ padding: 16, gap: 12 }}>
+          <Text style={{ color: t.muted, fontSize: 14, lineHeight: 21 }}>{copy.login.typeCode}</Text>
+          <Text selectable accessibilityLabel={attempt.code.userCode} style={{ color: t.fg, fontSize: 30, fontWeight: '700', letterSpacing: 3 }}>
+            {attempt.code.userCode}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <SmallButton label={copy.login.copyCode} icon="copy" onPress={() => void Clipboard.setStringAsync(attempt.code.userCode)} />
+            <SmallButton label={copy.login.openPage} icon="link" onPress={() => void Linking.openURL(attempt.code.verificationUrl)} />
+          </View>
+          <Text style={{ color: t.faint, fontSize: 13, lineHeight: 20 }}>{copy.login.waiting(new Date(attempt.code.expiresAt))}</Text>
+        </Card>
+      )}
+
+      {failure && (
+        <Notice tone="bad">
+          <View accessibilityRole="alert" style={st.row8top}>
+            <Icon name="alert" size={18} color={t.bad} />
+            <Text style={{ flex: 1, color: t.bad, fontSize: 14, lineHeight: 21 }}>{failure}</Text>
+          </View>
+        </Notice>
+      )}
+
+      <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18 }}>{copy.login.personalUse}</Text>
+      <View style={{ flex: 1 }} />
+
+      {loggedIn ? (
+        <PrimaryButton tall label={repair ? copy.onboarding.done : copy.onboarding.next} onPress={onDone} />
+      ) : attempt.kind === 'code' ? (
+        <QuietButton label={copy.common.cancel} onPress={attempt.cancel} />
+      ) : (
+        <PrimaryButton
+          tall
+          label={attempt.kind === 'asking' ? copy.login.gettingCode : attempt.kind === 'failed' ? copy.login.newCode : copy.login.getCode}
+          busy={attempt.kind === 'asking'}
+          onPress={() => void begin()}
+        />
+      )}
+    </ScrollView>
   );
 }
 
@@ -242,6 +167,7 @@ function LocationStep({ onChoose }: { onChoose: (allow: boolean) => void }) {
 function DoneStep({ location }: { location: boolean }) {
   const t = useTheme();
   const folder = useApp((a) => a.folder);
+  const login = useApp((a) => a.login);
   return (
     <View style={st.main}>
       <View style={[st.badge, { backgroundColor: t.okBg }]}>
@@ -257,8 +183,10 @@ function DoneStep({ location }: { location: boolean }) {
           <Text numberOfLines={1} style={{ flexShrink: 1, color: t.fg, fontSize: 14 }}>{folder?.tree.name ?? copy.folder.none}</Text>
         </View>
         <View style={[st.kv, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
-          <Text style={{ color: t.muted, fontSize: 14 }}>{copy.onboarding.computer}</Text>
-          <Text style={{ color: t.okFg, fontSize: 14 }}>{copy.common.connected}</Text>
+          <Text style={{ color: t.muted, fontSize: 14 }}>{copy.onboarding.account}</Text>
+          <Text numberOfLines={1} style={{ flexShrink: 1, color: login.kind === 'in' ? t.okFg : t.warn, fontSize: 14 }}>
+            {login.kind === 'in' ? (login.email ?? copy.settings.loggedIn) : copy.settings.notLoggedIn}
+          </Text>
         </View>
         <View style={st.kv}>
           <Text style={{ color: t.muted, fontSize: 14 }}>{copy.common.attachLocation}</Text>
@@ -278,15 +206,8 @@ const st = StyleSheet.create({
   main: { flexGrow: 1, paddingTop: 40, paddingHorizontal: 24, paddingBottom: 24, gap: 24 },
   title: { fontSize: 24, fontWeight: '600', letterSpacing: -0.48 },
   lede: { fontSize: 15, lineHeight: 24 },
-  qr: { height: 300, borderRadius: 16, backgroundColor: '#111111', alignItems: 'center', justifyContent: 'center', gap: 20, overflow: 'hidden' },
-  frame: { width: 180, height: 180 },
-  corner: { position: 'absolute', width: 28, height: 28, borderColor: '#ffffff' },
-  qrLabel: { fontSize: 14, color: '#b3b3b3' },
-  input: { height: 48, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, fontSize: 15 },
   row8: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   row8top: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  wrap6: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag: { height: 26, paddingHorizontal: 10, borderRadius: 6, justifyContent: 'center' },
   badge: { width: 56, height: 56, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   kv: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 52, paddingHorizontal: 16 },
 });

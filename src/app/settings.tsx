@@ -1,13 +1,11 @@
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { outbox } from '../lib/db';
-import type { OutboxRow } from '../lib/outbox';
-import type { MemoRequest } from '../lib/wire';
-import { flushNow, recheckFolder, refreshStatus, updateSettings, useApp, type Folder, type ThemePref } from '../state';
-import { useOutbox } from '../ui/hooks';
+import { useCallback, type ReactNode } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { filingStatus, statusLine } from '../lib/status';
+import { fileNow, logOut, recheckFolder, updateSettings, useApp, type Folder, type ThemePref } from '../state';
+import { useNow } from '../ui/hooks';
 import { Card, Header, Screen, SectionTitle, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
 import { copy } from '../text';
@@ -58,41 +56,67 @@ function Switch({ on, onToggle, label }: { on: boolean; onToggle: () => void; la
   );
 }
 
-function DeadRow({ row }: { row: OutboxRow }) {
+function ChatGptSection() {
   const t = useTheme();
-  let text = '';
-  try {
-    text = (JSON.parse(row.body) as MemoRequest).text;
-  } catch {}
+  const login = useApp((a) => a.login);
+  const account = login.kind === 'in' ? [login.email, login.plan].filter(Boolean).join(' · ') || copy.settings.loggedIn : login.kind === 'expired' ? copy.settings.loginExpired(login.email) : copy.settings.notLoggedIn;
+  function confirmLogOut() {
+    Alert.alert(copy.settings.logOutTitle, copy.settings.logOutBody, [
+      { text: copy.common.cancel, style: 'cancel' },
+      { text: copy.settings.logOut, style: 'destructive', onPress: () => void logOut() },
+    ]);
+  }
   return (
-    <View style={[st.dead, { borderTopColor: t.line }]}>
-      <Text numberOfLines={2} style={{ color: t.fg, fontSize: 14, lineHeight: 21 }}>{text}</Text>
-      <Text style={{ color: t.bad, fontSize: 12 }}>{row.last_error ?? copy.settings.notAccepted}</Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <SmallButton
-          label={copy.settings.resend}
-          icon="retry"
-          onPress={async () => {
-            await outbox.requeue(row.id);
-            void flushNow();
-          }}
-        />
-        <SmallButton label={copy.common.delete} color={t.muted} onPress={() => outbox.discard(row.id)} />
-      </View>
+    <View style={st.section}>
+      <SectionTitle style={st.h2}>{copy.settings.account}</SectionTitle>
+      <Card>
+        <Row label={copy.settings.accountRow}>
+          <Text numberOfLines={1} style={{ flexShrink: 1, color: login.kind === 'in' ? t.muted : t.warn, fontSize: 14 }}>{account}</Text>
+        </Row>
+        {login.kind === 'in' ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={copy.settings.logOut} onPress={confirmLogOut} style={st.action}>
+            <Text style={{ color: t.link, fontSize: 14 }}>{copy.settings.logOut}</Text>
+          </Pressable>
+        ) : (
+          <Pressable accessibilityRole="button" accessibilityLabel={copy.settings.logInAgain} onPress={() => router.push({ pathname: '/onboarding', params: { repair: 'login' } })} style={st.action}>
+            <Text style={{ color: t.link, fontSize: 14 }}>{copy.settings.logInAgain}</Text>
+          </Pressable>
+        )}
+      </Card>
+      <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18, marginHorizontal: 4 }}>{copy.login.personalUse}</Text>
+    </View>
+  );
+}
+
+function FilingSection() {
+  const t = useTheme();
+  const now = useNow();
+  const login = useApp((a) => a.login);
+  const folder = useApp((a) => a.folder?.state ?? null);
+  const online = useApp((a) => a.online);
+  const paused = useApp((a) => a.jobs.paused);
+  const waiting = useApp((a) => a.book?.counts.working ?? 0);
+  const line = statusLine(filingStatus({ login, folder, online, paused, waiting, now: now.getTime() }));
+  return (
+    <View style={st.section}>
+      <SectionTitle style={st.h2}>{copy.settings.filing}</SectionTitle>
+      <Card>
+        <View style={[st.row, { minHeight: 60, paddingVertical: 8, paddingRight: 8 }]}>
+          <View style={{ gap: 2, flexShrink: 1 }}>
+            <Text style={{ color: t.fg, fontSize: 14 }}>{waiting > 0 ? copy.settings.waiting(waiting) : copy.settings.upToDate}</Text>
+            {line && <Text style={{ color: line.tone === 'warn' ? t.warn : t.faint, fontSize: 12 }}>{line.text}</Text>}
+          </View>
+          <SmallButton label={copy.settings.fileNow} disabled={waiting === 0} onPress={() => void fileNow()} />
+        </View>
+      </Card>
     </View>
   );
 }
 
 export default function Settings() {
   const t = useTheme();
-  const pairing = useApp((a) => a.pairing);
-  const reachable = useApp((a) => a.reachable);
   const settings = useApp((a) => a.settings);
   const folder = useApp((a) => a.folder);
-  const rows = useOutbox();
-  const [checking, setChecking] = useState(false);
-  const queued = rows.filter((r) => r.state === 'queued');
-  const dead = rows.filter((r) => r.state === 'dead');
 
   // A fix made in Obsidian or a file manager shows when the user comes back here.
   useFocusEffect(
@@ -105,12 +129,6 @@ export default function Settings() {
     if (settings.location) return updateSettings({ location: false });
     const { granted } = await Location.requestForegroundPermissionsAsync();
     await updateSettings({ location: granted });
-  }
-
-  async function recheck() {
-    setChecking(true);
-    await refreshStatus();
-    setChecking(false);
   }
 
   return (
@@ -139,31 +157,7 @@ export default function Settings() {
           </Card>
         </View>
 
-        <View style={st.section}>
-          <SectionTitle style={st.h2}>{copy.settings.connection}</SectionTitle>
-          <Card>
-            <Row label={copy.settings.status}>
-              <View style={st.inline6}>
-                <View style={[st.dot, { backgroundColor: reachable === false ? t.warn : t.okFg }]} />
-                <Text style={{ color: reachable === false ? t.warn : t.okFg, fontSize: 14 }}>{reachable === false ? copy.settings.disconnected : copy.common.connected}</Text>
-              </View>
-            </Row>
-            <Row label={copy.settings.address}>
-              <Text numberOfLines={1} style={{ flexShrink: 1, color: t.muted, fontSize: 14 }}>{pairing?.url.replace(/^https?:\/\//, '')}</Text>
-            </Row>
-            <Row label={copy.settings.token} style={{ paddingRight: 8 }}>
-              <View style={st.inline6}>
-                <Text style={{ color: t.muted, fontSize: 14, letterSpacing: 2 }}>••••••••</Text>
-                <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: '/onboarding', params: { repair: 'settings' } })} style={st.link}>
-                  <Text style={{ color: t.link, fontSize: 14 }}>{copy.settings.repairQr}</Text>
-                </Pressable>
-              </View>
-            </Row>
-            <Pressable accessibilityRole="button" onPress={recheck} disabled={checking} style={st.action}>
-              <Text style={{ color: t.link, fontSize: 14 }}>{checking ? copy.common.checking : copy.settings.recheck}</Text>
-            </Pressable>
-          </Card>
-        </View>
+        <ChatGptSection />
 
         <View style={st.section}>
           <SectionTitle style={st.h2}>{copy.common.memo}</SectionTitle>
@@ -201,33 +195,11 @@ export default function Settings() {
           </Card>
         </View>
 
-        <View style={st.section}>
-          <SectionTitle style={st.h2}>{copy.settings.outbox}</SectionTitle>
-          <Card>
-            <View style={[st.row, { minHeight: 60, paddingVertical: 8, paddingRight: 8 }]}>
-              <View style={{ gap: 2, flexShrink: 1 }}>
-                <Text style={{ color: t.fg, fontSize: 14 }}>{copy.settings.unsent(queued.length)}</Text>
-                <Text style={{ color: t.faint, fontSize: 12 }}>{copy.settings.autoSend}</Text>
-              </View>
-              <SmallButton label={copy.settings.sendNow} disabled={queued.length === 0} onPress={() => void flushNow()} />
-            </View>
-            {dead.length > 0 && (
-              <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
-                <Text style={{ color: t.faint, fontSize: 12, paddingTop: 4, paddingBottom: 8 }}>{copy.settings.rejected(dead.length)}</Text>
-                {dead.map((r) => (
-                  <DeadRow key={r.id} row={r} />
-                ))}
-              </View>
-            )}
-          </Card>
-        </View>
+        <FilingSection />
 
         <View style={st.section}>
           <SectionTitle style={st.h2}>{copy.settings.about}</SectionTitle>
           <Card>
-            <Row label={copy.settings.gatewayVersion}>
-              <Text style={{ color: t.muted, fontSize: 14 }}>{pairing?.server ?? '-'}</Text>
-            </Row>
             <Row label={copy.settings.appVersion} last>
               <Text style={{ color: t.muted, fontSize: 14 }}>{Constants.expoConfig?.version ?? '-'}</Text>
             </Row>
@@ -243,13 +215,9 @@ const st = StyleSheet.create({
   section: { gap: 8 },
   h2: { marginHorizontal: 4 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, minHeight: 52, paddingHorizontal: 16 },
-  inline6: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  link: { height: 36, paddingHorizontal: 10, justifyContent: 'center' },
   action: { minHeight: 52, paddingHorizontal: 16, justifyContent: 'center' },
   switch: { width: 52, height: 32, borderRadius: 16, padding: 3, flexDirection: 'row', alignItems: 'center' },
   knob: { width: 26, height: 26, borderRadius: 13, elevation: 2 },
   segs: { flexDirection: 'row', gap: 4, padding: 4, borderRadius: 10 },
   seg: { flex: 1, height: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  dead: { gap: 6, paddingVertical: 12, borderTopWidth: 1 },
 });
