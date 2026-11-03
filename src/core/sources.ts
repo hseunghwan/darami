@@ -1,0 +1,131 @@
+/**
+ * The enrichment sidecar `<d>/raw/<id>.source.md`: which links in a memo get fetched, and the
+ * file that records what came back. Pure, like pages.ts. Fetching the links comes with P6.
+ */
+
+import { splitFrontmatter, withFrontmatter, type MemoSource } from './pages';
+import type { Text } from './text';
+import type { Locale, MemoId, Parsed } from './types';
+
+/** `video` stays: sidecars dotoriwiki wrote for YouTube links still parse. */
+export type SourceKind = 'video' | 'article';
+/** What one link held. A dead link is a `failed` value, not an error: the job goes on without it. */
+export type FetchedSource =
+  | { readonly kind: SourceKind; readonly status: 'ok'; readonly title: string; readonly text: string }
+  | { readonly kind: SourceKind; readonly status: 'failed'; readonly title: string | null; readonly detail: string };
+
+export const MAX_SOURCES = 3;
+export const MAX_SOURCE_CHARS = 30_000;
+
+export type SourceEntry = { readonly url: string } & FetchedSource;
+export type SourceFile = { readonly memo: MemoId; readonly fetchedAt: string; readonly sources: readonly SourceEntry[] };
+
+/**
+ * The labels of the memo lines enrichment reads, by locale. Feed memos in raw/ already carry
+ * them, so like ledger words they never change, and every wiki reads every locale's labels.
+ */
+export const MEMO_LINK_LABELS: { readonly [L in Locale]: { readonly link: string; readonly discussion: string } } = {
+  ko: { link: '원문', discussion: '토론' },
+  en: { link: 'Link', discussion: 'Discussion' },
+};
+
+const labels = Object.values(MEMO_LINK_LABELS);
+const LINK_LINE = new RegExp(`^(?:${labels.map((l) => l.link).join('|')}):`);
+const DISCUSSION_LINE = new RegExp(`^\\s*(?:${labels.map((l) => l.discussion).join('|')})\\s*:`);
+
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`\]]+/g;
+
+function trimUrl(raw: string): string | null {
+  let url = raw.replace(/[.,;:!?]+$/, '');
+  while (url.endsWith(')') && url.split('(').length < url.split(')').length) url = url.slice(0, -1);
+  try {
+    new URL(url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The first MAX_SOURCES distinct links, in order of appearance. A discussion line names a page
+ * whose content is already in the memo. A feed memo is fetched only by its link line, so links
+ * inside a feed's summary (an advisory's references) are not.
+ */
+export function linksToFetch(memoText: string, source: MemoSource): readonly string[] {
+  const out: string[] = [];
+  for (const line of memoText.split('\n')) {
+    if (DISCUSSION_LINE.test(line) || (source === 'feed' && !LINK_LINE.test(line))) continue;
+    for (const m of line.matchAll(URL_IN_TEXT)) {
+      const url = trimUrl(m[0]);
+      if (url && !out.includes(url)) out.push(url);
+    }
+  }
+  return out.slice(0, MAX_SOURCES);
+}
+
+const cap = (text: string, t: Text) => {
+  const s = text.trim();
+  return s.length <= MAX_SOURCE_CHARS ? s : `${s.slice(0, MAX_SOURCE_CHARS).trimEnd()}\n\n${t.sidecar.truncated(s.length, MAX_SOURCE_CHARS)}`;
+};
+
+const bodyOf = (s: SourceEntry, t: Text) => (s.status === 'ok' ? cap(s.text, t) : t.sidecar.fetchFailed(s.detail));
+
+export function renderSourceFile(f: SourceFile, t: Text): string {
+  return withFrontmatter(
+    {
+      memo: f.memo,
+      fetched_at: f.fetchedAt,
+      sources: f.sources.map((s) => ({
+        url: s.url,
+        kind: s.kind,
+        status: s.status,
+        title: s.title,
+        detail: s.status === 'failed' ? s.detail : null,
+      })),
+    },
+    f.sources.map((s) => `\n## ${s.url}\n\n${bodyOf(s, t)}\n`).join(''),
+  );
+}
+
+const KINDS: readonly SourceKind[] = ['video', 'article'];
+
+/** Texts come back as written: capped, trimmed. */
+export function parseSourceFile(text: string): Parsed<SourceFile> {
+  const { data, body, error } = splitFrontmatter(text);
+  if (!data) return { ok: false, detail: error ?? 'no frontmatter' };
+  if (typeof data.memo !== 'string' || typeof data.fetched_at !== 'string' || !Array.isArray(data.sources)) {
+    return { ok: false, detail: 'memo, fetched_at, sources required' };
+  }
+  const list = data.sources.filter((s): s is Record<string, unknown> => typeof s === 'object' && s !== null && !Array.isArray(s));
+  if (list.length !== data.sources.length) return { ok: false, detail: 'sources: expected a list of mappings' };
+  const sources: SourceEntry[] = [];
+  let at = 0;
+  const heads = list.map((s) => `\n## ${String(s.url)}\n`);
+  for (const [i, raw] of list.entries()) {
+    const { url, kind, status, title, detail } = raw;
+    if (typeof url !== 'string' || !KINDS.includes(kind as SourceKind)) return { ok: false, detail: `sources[${i}]: url and kind required` };
+    const start = body.indexOf(heads[i]!, at);
+    if (start < 0) return { ok: false, detail: `no section for ${url}` };
+    const from = start + heads[i]!.length;
+    const next = i + 1 < heads.length ? body.indexOf(heads[i + 1]!, from) : -1;
+    at = next < 0 ? body.length : next;
+    const section = body.slice(from, at).trim();
+    const k = kind as SourceKind;
+    if (status === 'ok' && typeof title === 'string') sources.push({ url, kind: k, status, title, text: section });
+    else if (status === 'failed' && typeof detail === 'string') sources.push({ url, kind: k, status, title: typeof title === 'string' ? title : null, detail });
+    else return { ok: false, detail: `sources[${i}]: bad status` };
+  }
+  return { ok: true, value: { memo: data.memo as MemoId, fetchedAt: data.fetched_at, sources } };
+}
+
+/** `2026-10-29T10:00:00+09:00` in the given zone, the shape captured_at uses. */
+export function isoWithOffset(at: Date, tz: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'longOffset',
+    }).formatToParts(at).map((x) => [x.type, x.value]),
+  );
+  const offset = p.timeZoneName === 'GMT' ? '+00:00' : p.timeZoneName!.slice(3);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${offset}`;
+}
