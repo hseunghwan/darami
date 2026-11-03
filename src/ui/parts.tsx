@@ -102,6 +102,7 @@ export function PrimaryButton({ label, onPress, disabled, busy, icon, style, tal
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ disabled: !!off, busy: !!busy }}
       disabled={off}
       onPress={onPress}
@@ -116,7 +117,7 @@ export function PrimaryButton({ label, onPress, disabled, busy, icon, style, tal
 export function QuietButton({ label, onPress }: { label: string; onPress: () => void }) {
   const t = useTheme();
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={s.quiet}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={s.quiet}>
       <Text style={{ color: t.muted, fontSize: 15 }}>{label}</Text>
     </Pressable>
   );

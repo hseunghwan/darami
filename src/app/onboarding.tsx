@@ -6,6 +6,7 @@ import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInpu
 import { gateway } from '../lib/gateway';
 import { pairingFailureCopy, parseManual, parseQr, type Candidate, type PairingFailure, type PairingMode } from '../lib/pairing';
 import { pair, updateSettings, useApp } from '../state';
+import { FolderStep } from '../ui/folder-step';
 import { Icon } from '../ui/icon';
 import { Card, Notice, PrimaryButton, QuietButton, Screen } from '../ui/parts';
 import { useTheme } from '../ui/theme';
@@ -19,13 +20,17 @@ type Connect = {
   connected: string[] | null;
 };
 
-type Step = { kind: 'connect' } | { kind: 'location' } | { kind: 'done' };
-const STEP_INDEX: Record<Step['kind'], number> = { connect: 0, location: 1, done: 2 };
+/** P4 replaces 'connect' with the login. */
+const STEPS = ['folder', 'connect', 'location', 'done'] as const;
+type Step = (typeof STEPS)[number];
+
+/** `?repair=folder` runs the folder step alone; any other repair is the gateway's. */
+const firstStep = (repair: string | undefined): Step => (repair === undefined || repair === 'folder' ? 'folder' : 'connect');
 
 export default function Onboarding() {
   const t = useTheme();
   const { repair } = useLocalSearchParams<{ repair?: string }>();
-  const [step, setStep] = useState<Step>({ kind: 'connect' });
+  const [step, setStep] = useState<Step>(() => firstStep(repair));
   const [connect, setConnect] = useState<Connect>({ mode: 'qr', checking: false, failure: null, connected: null });
   const location = useApp((a) => a.settings.location);
 
@@ -42,30 +47,31 @@ export default function Onboarding() {
     if (repair) {
       if (router.canGoBack()) router.back();
       else router.replace('/');
-    } else setStep({ kind: 'location' });
+    } else setStep(STEPS[STEPS.indexOf(step) + 1]!);
   }
 
   async function chooseLocation(allow: boolean) {
     const granted = allow && (await Location.requestForegroundPermissionsAsync()).granted;
     await updateSettings({ location: granted });
-    setStep({ kind: 'done' });
+    setStep('done');
   }
 
-  const index = STEP_INDEX[step.kind];
+  const index = STEPS.indexOf(step);
   return (
     <Screen>
       {!repair && (
-        <View accessibilityLabel={copy.onboarding.steps(index + 1, 3)} style={st.steps}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={[st.step, { backgroundColor: i <= index ? t.link : t.line2 }]} />
+        <View accessibilityLabel={copy.onboarding.steps(index + 1, STEPS.length)} style={st.steps}>
+          {STEPS.map((s, i) => (
+            <View key={s} style={[st.step, { backgroundColor: i <= index ? t.link : t.line2 }]} />
           ))}
         </View>
       )}
-      {step.kind === 'connect' && (
+      {step === 'folder' && <FolderStep repair={!!repair} onDone={next} />}
+      {step === 'connect' && (
         <ConnectStep state={connect} repair={repair ?? null} onCheck={check} onMode={(mode) => setConnect({ mode, checking: false, failure: null, connected: null })} onNext={next} />
       )}
-      {step.kind === 'location' && <LocationStep onChoose={chooseLocation} />}
-      {step.kind === 'done' && <DoneStep location={location} />}
+      {step === 'location' && <LocationStep onChoose={chooseLocation} />}
+      {step === 'done' && <DoneStep location={location} />}
     </Screen>
   );
 }
@@ -235,6 +241,7 @@ function LocationStep({ onChoose }: { onChoose: (allow: boolean) => void }) {
 
 function DoneStep({ location }: { location: boolean }) {
   const t = useTheme();
+  const folder = useApp((a) => a.folder);
   return (
     <View style={st.main}>
       <View style={[st.badge, { backgroundColor: t.okBg }]}>
@@ -245,6 +252,10 @@ function DoneStep({ location }: { location: boolean }) {
         <Text style={[st.lede, { color: t.muted }]}>{copy.onboarding.readyLede}</Text>
       </View>
       <Card>
+        <View style={[st.kv, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
+          <Text style={{ color: t.muted, fontSize: 14 }}>{copy.folder.label}</Text>
+          <Text numberOfLines={1} style={{ flexShrink: 1, color: t.fg, fontSize: 14 }}>{folder?.tree.name ?? copy.folder.none}</Text>
+        </View>
         <View style={[st.kv, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
           <Text style={{ color: t.muted, fontSize: 14 }}>{copy.onboarding.computer}</Text>
           <Text style={{ color: t.okFg, fontSize: 14 }}>{copy.common.connected}</Text>
