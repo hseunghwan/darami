@@ -12,9 +12,11 @@
  * - createFile never fails on a clash: it renames (`c.md (1)`, and `C.md (2)` beside `c.md`). create
  *   looks first, and when a race still renames, it compares names and discards the twin.
  * - A null MIME turns `a.md` into `a.md.txt`; application/octet-stream kept every name exactly.
- * - `write()` does not truncate. writeWhole, the only writer, opens with Truncate.
- * - `delete()` on a folder deletes everything in it. discardTwin, the only caller, deletes only what
- *   this same call just made.
+ * - `write()` does not truncate. writeWhole, the only writer and the only `open`, opens with Truncate.
+ * - `delete()` on a folder deletes everything in it. discardTwin deletes only what this same call
+ *   just made, and removeFile takes only a File, which `exists` showed to be a file.
+ * - `delete()` on a missing file throws, so remove answers a lost race as 'absent' after a second look.
+ * - makeFile is the only createFile, so the twin check and the MIME constant stay in one place.
  *
  * No cache: Obsidian and Syncthing change the same folder.
  */
@@ -55,6 +57,22 @@ export function safFs(tree: SafTree): Fs {
     return dir;
   }
 
+  /**
+   * A new empty file at `path`, its parent folders made. null when something took the name between
+   * the caller's look and createFile: that file may still be being written, so it is never filled.
+   */
+  function makeFile(path: WikiPath): File | null {
+    const slash = path.lastIndexOf('/');
+    const name = path.slice(slash + 1);
+    const parent = ensureFolder((slash < 0 ? ROOT : path.slice(0, slash)) as WikiPath);
+    const made = parent.createFile(name, MIME);
+    if (made.name.normalize('NFC') === name) return made;
+    discardTwin(made);
+    if (fileAt(path).exists) return null;
+    if (dirAt(path).exists) throw new Error(`${path} is a folder`);
+    throw new Error(`the storage would store ${path} as ${made.name}`);
+  }
+
   return {
     async readText(path) {
       guard(path);
@@ -82,19 +100,58 @@ export function safFs(tree: SafTree): Fs {
       const there = fileAt(path);
       if (there.exists) return fill(there, text);
       if (dirAt(path).exists) throw new Error(`${path} is a folder`);
-      const slash = path.lastIndexOf('/');
-      const name = path.slice(slash + 1);
-      const parent = ensureFolder((slash < 0 ? ROOT : path.slice(0, slash)) as WikiPath);
-      const made = parent.createFile(name, MIME);
-      if (made.name.normalize('NFC') === name) {
-        if (text !== '') await writeWhole(made, text);
-        return 'created';
-      }
-      // Something took the name between the look and createFile, maybe still being written: never fill it.
-      discardTwin(made);
-      if (fileAt(path).exists) return 'exists';
+      const made = makeFile(path);
+      if (!made) return 'exists';
+      if (text !== '') await writeWhole(made, text);
+      return 'created';
+    },
+
+    async write(path, text) {
+      guard(path);
+      if (path === ROOT) throw new Error('the folder itself is not a file');
+      const there = fileAt(path);
+      if (there.exists) return writeWhole(there, text);
       if (dirAt(path).exists) throw new Error(`${path} is a folder`);
-      throw new Error(`the storage would store ${path} as ${made.name}`);
+      await writeWhole(makeFile(path) ?? fileAt(path), text);
+    },
+
+    async remove(path) {
+      guard(path);
+      if (path === ROOT) throw new Error('the folder itself is not a file');
+      const f = fileAt(path);
+      if (!f.exists) {
+        if (dirAt(path).exists) throw new Error(`${path} is a folder`);
+        rootAnswers();
+        return 'absent';
+      }
+      try {
+        removeFile(f);
+      } catch (e) {
+        if (fileAt(path).exists) throw e;
+        return 'absent';
+      }
+      return 'removed';
+    },
+
+    async listTree(dir) {
+      guard(dir);
+      if (!dirAt(dir).exists) {
+        if (fileAt(dir).exists) throw new Error(`${dir} is a file`);
+        rootAnswers();
+        return [];
+      }
+      const out: WikiPath[] = [];
+      const walk = (at: WikiPath) => {
+        for (const e of dirAt(at).list()) {
+          const name = e.name.normalize('NFC');
+          if (name.startsWith('.')) continue;
+          const child = (at === ROOT ? name : `${at}/${name}`) as WikiPath;
+          if (e instanceof Directory) walk(child);
+          else out.push(child);
+        }
+      };
+      walk(dir);
+      return [...new Set(out)].sort();
     },
   };
 }
@@ -114,6 +171,10 @@ async function writeWhole(file: File, text: string): Promise<void> {
   } finally {
     handle.close();
   }
+}
+
+function removeFile(file: File): void {
+  file.delete();
 }
 
 /** A twin folder is fresh and so empty; it is checked anyway, because Directory.delete is recursive. */

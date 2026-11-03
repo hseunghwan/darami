@@ -39,6 +39,35 @@ const SAF_CASES: readonly FsCase[] = [
       same(await fs.list(at('스터디')), ['a.md', 'b.md'], 'both files');
     },
   },
+  {
+    name: 'SAF: a write to C.md beside c.md replaces c.md and leaves one file named c.md',
+    run: async (fs, seed) => {
+      await seed.file('c.md', 'first, longer\n');
+      await fs.write(at('C.md'), 'second\n');
+      same(await fs.readText(at('c.md')), 'second\n', 'replaced');
+      same(await fs.list(ROOT), ['c.md'], 'one file, its name kept');
+    },
+  },
+  {
+    name: 'SAF: a write inside a folder stored as NFD makes no NFC twin folder',
+    run: async (fs, seed) => {
+      await seed.file('미루기 아카이빙/wiki/a.md'.normalize('NFD'), 'a\n');
+      await fs.write(at('미루기 아카이빙/wiki/b.md'), 'b\n');
+      await fs.write(at('미루기 아카이빙/wiki/a.md'), 'a2\n');
+      same(await fs.list(ROOT), ['미루기 아카이빙'], 'no folder twin');
+      same(await fs.list(at('미루기 아카이빙/wiki')), ['a.md', 'b.md'], 'both files');
+      same(await fs.readText(at('미루기 아카이빙/wiki/a.md')), 'a2\n', 'the NFD file replaced');
+    },
+  },
+  {
+    name: 'SAF: listTree names a file stored as NFD by its NFC path, and remove finds it there',
+    run: async (fs, seed) => {
+      await seed.file('스터디/wiki/인사이트/2026.md'.normalize('NFD'), 'i\n');
+      same(await fs.listTree(at('스터디')), ['스터디/wiki/인사이트/2026.md'], 'NFC path');
+      same(await fs.remove(at('스터디/wiki/인사이트/2026.md')), 'removed', 'removed by its NFC path');
+      same(await fs.listTree(at('스터디')), [], 'gone');
+    },
+  },
 ];
 
 const CASES = [...FS_CASES, ...SAF_CASES];

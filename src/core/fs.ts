@@ -16,7 +16,9 @@
  *   was expected. The engine catches none of it, FolderUnreachable aside.
  * - Nothing is atomic. SAF has no rename, so a file cannot appear whole at once: a reader or a
  *   crash can see a file that is empty or partly written. create only writes into a file it made
- *   or one that was empty, so a crash never mixes two texts.
+ *   or one that was empty, so a crash never mixes two texts. write is the one method that
+ *   replaces text, and it is not atomic either: the engine journals a file's old text before it
+ *   writes (src/jobs/transaction.ts).
  * - Async, because SAF answers over a binder call.
  *
  * A method joins the port with the phase whose code first calls it, so no method's semantics are
@@ -57,4 +59,27 @@ export type Fs = {
    * last byte is written.
    */
   create(path: WikiPath, text: string): Promise<'created' | 'exists'>;
+
+  /**
+   * The file `path` now holds exactly `text`, made with its missing parent folders when absent.
+   * Truncates, then writes, so a crash part way leaves the file empty or holding a prefix of
+   * `text`'s UTF-8 bytes, never old bytes after new ones. On storage that folds case, writing `C.md`
+   * beside `c.md` writes c.md and keeps its name. Throws on a folder at `path`, a file where a
+   * parent folder should be, and ROOT. Leaves no renamed twin. Resolves after the last byte.
+   */
+  write(path: WikiPath, text: string): Promise<void>;
+
+  /**
+   * Deletes the file `path`. 'absent' when no file is there, a missing parent included, so a rerun
+   * after a crash changes nothing. Never deletes a folder: a folder at `path` throws and keeps
+   * what it holds. Leaves the parent folder, empty or not.
+   */
+  remove(path: WikiPath): Promise<'removed' | 'absent'>;
+
+  /**
+   * Every file under `dir` at any depth: NFC, distinct, sorted by UTF-16 code unit. A name starting
+   * with `.` is skipped and a folder with such a name is not entered, so .obsidian/ and .trash/ cost
+   * nothing. `[]` when `dir` is missing. Throws when `dir` is a file. Not limited to `.md`.
+   */
+  listTree(dir: WikiPath): Promise<readonly WikiPath[]>;
 };
