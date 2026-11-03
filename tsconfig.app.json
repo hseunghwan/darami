@@ -7,6 +7,7 @@
     "**/__tests__/**",
     "jest.setup.ts",
     "src/fs/node.ts",
+    "scripts/**",
     "node_modules",
     "babel.config.js",
     "metro.config.js",
