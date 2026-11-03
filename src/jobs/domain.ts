@@ -28,7 +28,7 @@ type Candidate =
 const byOrder = (a: Candidate, b: Candidate) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0);
 const under = (d: DomainName, files: readonly WikiPath[]) => files.map((f) => f.slice(`${paths.wiki(d)}/`.length));
 
-export function domainJobs(ctx: Ctx): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void> } {
+export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<void>): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void> } {
   const { fs } = ctx;
 
   /** The pages and answers under wiki/ as they are now, for index.md. */
@@ -122,6 +122,7 @@ export function domainJobs(ctx: Ctx): Pick<Engine, 'runNext'> & { readonly init:
         const t = textFor(config.locale);
         await ensureDomain(dc, t);
         await ctx.journal.recover(d);
+        await finishMoves(d);
         const ledger = await readLedger(fs, d);
         const picked = (await candidates(config, d, ledger)).find((j) => opts.withModel || j.kind === 'file-answer');
         if (!picked) return { kind: 'idle' };

@@ -1,6 +1,6 @@
 /** The fakes the engine tests share. Not a test file: testMatch takes *.test.ts only. */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Fs } from '../../core/fs';
@@ -86,9 +86,9 @@ export function memoryJournal(): JournalStore & { calls(): number; rows(): numbe
 export type Cut = { readonly at: number; readonly how: 'before' | 'torn' };
 
 /**
- * The node adapter with one kill. Changes (write, remove, create) count from 1. At `at`, 'before'
- * kills without touching the folder; 'torn' leaves the first half of the text's UTF-8 bytes, as a
- * write cut off part way does, then kills.
+ * The node adapter with one kill. Changes (write, remove, and a create that writes) count from 1.
+ * At `at`, 'before' kills without touching the folder; 'torn' leaves the first half of the text's
+ * UTF-8 bytes, as a write cut off part way does, then kills.
  */
 export function faultyFs(root: string, cut: Cut | null): Fs & { changes(): number } {
   const inner = nodeFs(root);
@@ -112,7 +112,7 @@ export function faultyFs(root: string, cut: Cut | null): Fs & { changes(): numbe
       return inner.write(path, text);
     },
     async create(path, text) {
-      await hit('create', path, (await inner.readText(path)) ? null : text);
+      if (!(await inner.readText(path).catch(() => 'not a file'))) await hit('create', path, text);
       return inner.create(path, text);
     },
     async remove(path) {
@@ -210,3 +210,14 @@ export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: Engi
 
 export const NO_SIGNAL = new AbortController().signal;
 export const run = (e: Engine, d: string, withModel = true) => e.runNext(d as DomainName, { withModel, signal: NO_SIGNAL });
+
+/** A folder set up once and copied for each run, with an empty journal: `make` must leave no journal row. */
+export async function template(make: () => Promise<{ readonly root: string; readonly store: Store }>): Promise<() => Promise<{ readonly root: string; readonly store: Store }>> {
+  const made = await make();
+  if (made.store.rows() !== 0) throw new Error('the template left a journal row');
+  return async () => {
+    const root = mkdtempSync(join(tmpdir(), 'darami-engine-'));
+    cpSync(made.root, root, { recursive: true });
+    return { root, store: memoryJournal() };
+  };
+}

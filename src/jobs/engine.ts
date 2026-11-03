@@ -17,7 +17,7 @@ import { CONFIG_FILE, type ConfigParse, type ConfigProblem, type MachineFacts } 
 import { dayIn } from '../core/filing';
 import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
-import type { NewMemo, Problem, Routing } from '../core/pages';
+import type { MemoSource, NewMemo, Problem, Routing } from '../core/pages';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
@@ -55,6 +55,21 @@ export type RunReport =
   | { readonly kind: 'cancelled'; readonly job: JobRef }
   | { readonly kind: 'paused' };
 
+export type HeldMemo = {
+  readonly id: MemoId;
+  readonly domain: DomainName;
+  readonly text: string;
+  readonly capturedAt: string;
+  readonly source: MemoSource;
+  readonly routing: Routing;
+};
+
+export type ReleaseResult =
+  | { readonly kind: 'released'; readonly domain: DomainName }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'conflict'; readonly at: Located }
+  | { readonly kind: 'paused' };
+
 /** What happens inside the engine that no call answers: a job starting, a stale journal row settled. */
 export type EngineEvent =
   | { readonly kind: 'started'; readonly job: JobRef; readonly attempt: number }
@@ -71,6 +86,14 @@ export type Engine = {
    * `withModel: false` runs only jobs that need no model.
    */
   runNext(domain: DomainName, opts: { readonly withModel: boolean; readonly signal: AbortSignal }): Promise<RunReport>;
+  /** Memos waiting in hold/, oldest first. Removes hold copies left by a confirm or move cut off after its copy. */
+  held(): Promise<readonly HeldMemo[]>;
+  /** A held memo into its domain's raw/, byte for byte. */
+  confirm(id: MemoId): Promise<ReleaseResult>;
+  /** A held or gave-up memo into another domain, with routing `by: user`. Never an ingested one. */
+  move(id: MemoId, to: DomainName): Promise<ReleaseResult>;
+  /** A retry line for a gave-up ingest, unless the memo was moved on. */
+  retry(domain: DomainName, id: MemoId): Promise<'retrying' | 'not-failed'>;
   locate(id: MemoId): Promise<Located | 'inbox' | null>;
   /** Declared domains in config order, or null while dotoriwiki.yaml or a CLAUDE.md it needs is broken or missing. */
   domains(): Promise<readonly DomainName[] | null>;
@@ -130,10 +153,17 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     jobLane: lanes<DomainName>(),
   };
   await journal.recover();
-  const jobs = domainJobs(ctx);
+  const memos = memoTransitions(ctx);
+  const jobs = domainJobs(ctx, memos.finishMoves);
   await jobs.init();
   return {
-    ...memoTransitions(ctx),
+    accept: memos.accept,
+    routeNext: memos.routeNext,
+    held: memos.held,
+    confirm: memos.confirm,
+    move: memos.move,
+    retry: memos.retry,
+    locate: memos.locate,
     runNext: jobs.runNext,
     async domains() {
       const c = await config();
