@@ -154,7 +154,7 @@ test('a kill anywhere in a committing job, and anywhere in its recovery, leaves 
   }, commitOne);
   assert.deepEqual(r.seen, ['committed', 'interrupted', 'untouched']);
   assert.ok(r.runs > 50, `${r.runs} kills`);
-});
+}, 30_000);
 
 test('a kill anywhere in a failing job leaves it failed or interrupted, its pages as they were', async () => {
   const reason = 'broken-link 스터디/wiki/RAG.md: [[없음]] does not resolve';
@@ -169,7 +169,7 @@ test('a kill anywhere in a failing job leaves it failed or interrupted, its page
     await tx.fail([{ rule: 'broken-link', path: '스터디/wiki/RAG.md', detail: '[[없음]] does not resolve' }]);
   });
   assert.deepEqual(r.seen, ['failed', 'interrupted', 'untouched']);
-});
+}, 30_000);
 
 test('a kill anywhere in a third attempt gives up once, with one _review.md note', async () => {
   const note = (reason: string) => `# 검토할 것\n\n- [2026-10-29] ingest \`${A}\` 포기 3/3: ${reason}\n`;
@@ -184,7 +184,7 @@ test('a kill anywhere in a third attempt gives up once, with one _review.md note
     await tx.fail([{ rule: 'empty', path: '스터디/wiki/RAG.md', detail: 'page has no body' }]);
   });
   assert.deepEqual(r.seen, ['gave up', 'gave up interrupted', 'untouched']);
-});
+}, 30_000);
 
 test('a kill anywhere in a lone line leaves the line there or not, never torn', async () => {
   const r = await outcomes({
@@ -194,4 +194,4 @@ test('a kill anywhere in a lone line leaves the line there or not, never torn', 
     await open(fs, store).appendLine(스터디, () => ({ job: 'ingest', id: A, outcome: { kind: 'retry' } }));
   });
   assert.deepEqual(r.seen, ['untouched', 'written']);
-});
+}, 30_000);

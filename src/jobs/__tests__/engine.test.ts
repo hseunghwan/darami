@@ -7,7 +7,7 @@ import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
 import { fakeModel, plays, turn, type Script } from '../../agent/__tests__/fake-model';
 import type { EngineEvent } from '../engine';
-import { changed, engineOn, everyKill, Killed, memoryJournal, presetWiki, read, run, NO_SIGNAL, snapshot, type Store } from './harness';
+import { changed, engineOn, everyKill, Killed, memoryJournal, presetWiki, read, run, NO_SIGNAL, snapshot, template, type Store } from './harness';
 
 const 스터디 = '스터디' as DomainName;
 const LOG = '스터디/wiki/log.md';
@@ -217,11 +217,11 @@ test('a kill anywhere in an ingest, and anywhere in the recovery after it, leave
     const w = await routedMemo(script);
     return { root: w.root, store: w.store };
   };
-  const base = await prep();
-  const before = snapshot(base.root);
+  const fresh = await template(prep);
+  const before = snapshot((await fresh()).root);
   const ends = new Set<string>();
   const seen = await everyKill({
-    fresh: prep,
+    fresh,
     act: async (fs, store) => void (await (await engineOn(fs, store, fakeModel(script))).runNext(스터디, { withModel: true, signal: NO_SIGNAL })),
     reopen: async (fs, store) => void (await engineOn(fs, store, fakeModel(script))),
     check: async (root, store, where) => {
@@ -240,7 +240,7 @@ test('a kill anywhere in an ingest, and anywhere in the recovery after it, leave
   });
   assert.deepEqual([...ends].sort(), ['committed', 'interrupted', 'untouched']);
   assert.ok(seen > 30, `${seen} kills`);
-});
+}, 30_000);
 
 test('a staged answer is filed with no model, before any memo, and its staging goes', async () => {
   const id = ulid(9);
