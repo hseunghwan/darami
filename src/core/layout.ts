@@ -121,3 +121,26 @@ export function placeOf(domain: DomainName, declared: readonly DomainName[], pat
 
 /** `path` as the job's model names it: relative to the domain folder, `../` for another folder. */
 export const shownPath = (domain: DomainName, path: WikiPath): string => (path.startsWith(`${domain}/`) ? path.slice(domain.length + 1) : `../${path}`);
+
+/** A folder that holds memo files. `domain` is the path segment as written, not checked against the config. */
+export type MemoSpot = { readonly kind: 'inbox' } | { readonly kind: 'raw' | 'hold'; readonly domain: string };
+
+/** `inbox`, `<d>/raw`, or `<d>/hold`; null for anything else, `inbox/answers/<d>` and `inbox/.rejected` included. */
+export function memoDirOf(dir: WikiPath): MemoSpot | null {
+  if (dir === paths.inbox) return { kind: 'inbox' };
+  const [domain, sub, ...rest] = dir.split('/');
+  if (rest.length > 0 || !domain || domain.startsWith('.') || domain === paths.inbox) return null;
+  return sub === 'raw' || sub === 'hold' ? { kind: sub, domain } : null;
+}
+
+/** What a write to `path` changes for the memo screens: a name in a memo folder, or a domain's ledger. */
+export type Touched = { readonly kind: 'memo'; readonly dir: WikiPath; readonly name: string } | { readonly kind: 'ledger' };
+
+export function touchedBy(path: WikiPath): Touched | null {
+  const cut = path.lastIndexOf('/');
+  if (cut < 0) return null;
+  const dir = path.slice(0, cut) as WikiPath;
+  if (memoDirOf(dir)) return { kind: 'memo', dir, name: path.slice(cut + 1) };
+  const [domain, wiki, log, ...rest] = path.split('/');
+  return domain && !domain.startsWith('.') && wiki === 'wiki' && log === 'log.md' && rest.length === 0 ? { kind: 'ledger' } : null;
+}

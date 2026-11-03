@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TimeZone } from '../config';
-import { appliedPages, classifierText, dayIn, failureOutcome, MAX_ATTEMPTS, parseClassification, withReviewNote } from '../filing';
+import { appliedPages, classifierText, committedPages, dayIn, failureOf, failureOutcome, MAX_ATTEMPTS, parseClassification, withReviewNote } from '../filing';
 import type { Change } from '../pages';
 import { textFor } from '../text';
 import type { DomainName } from '../types';
@@ -57,4 +57,24 @@ test("a day is the wiki's own date, not the phone's or UTC's", () => {
   const at = new Date('2026-10-29T16:30:00Z');
   assert.equal(dayIn('Asia/Seoul' as TimeZone, at), '2026-10-30');
   assert.equal(dayIn('America/Chicago' as TimeZone, at), '2026-10-29');
+});
+
+test('a failure reads as interrupted by its word or by either app\'s reason, and otherwise by its first problem rule', () => {
+  const attempt = (reason: string, interrupted = false) => ({ kind: 'attempt-failed', attempt: 1, max: 3, reason, interrupted }) as const;
+  const gaveUp = (reason: string) => ({ kind: 'gave-up', attempt: 3, max: 3, reason }) as const;
+  assert.deepEqual(failureOf(attempt('broken-link 스터디/wiki/a.md: [[없음]] does not resolve'), 1), { attempts: 1, max: 3, code: 'broken-link', detail: '스터디/wiki/a.md: [[없음]] does not resolve' });
+  assert.deepEqual(failureOf(attempt('gateway stopped mid-job', true), 2), { attempts: 2, max: 3, code: 'interrupted', detail: 'gateway stopped mid-job' });
+  assert.equal(failureOf(gaveUp('app stopped mid-job'), 3).code, 'interrupted', 'a gave-up line has no interrupted word');
+  assert.equal(failureOf(gaveUp('gateway stopped mid-job'), 3).code, 'interrupted');
+  assert.deepEqual(failureOf(gaveUp('the disk was full'), 3), { attempts: 3, max: 3, code: 'unknown', detail: 'the disk was full' });
+});
+
+test('a commit\'s pages come in the applied line\'s order, each created or modified, with the type the job wrote', () => {
+  const changes: Change[] = [{ path: '스터디/wiki/new.md', status: 'added' }, { path: '스터디/wiki/old.md', status: 'modified' }, { path: '스터디/wiki/_review.md', status: 'modified' }];
+  const contents = new Map([['스터디/wiki/new.md', '---\ntype: concept\n---\nx\n'], ['스터디/wiki/old.md', 'no frontmatter\n']]);
+  assert.deepEqual(committedPages(스터디, changes, contents), [
+    { pathUnderWiki: 'old.md', change: 'modified', type: null },
+    { pathUnderWiki: 'new.md', change: 'created', type: 'concept' },
+  ]);
+  assert.deepEqual(committedPages(스터디, changes, contents).map((p) => p.pathUnderWiki), appliedPages(스터디, changes));
 });

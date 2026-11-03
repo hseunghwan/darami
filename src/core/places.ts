@@ -13,7 +13,8 @@
  * whole before it deletes another copy because of it (jobs/memos.ts).
  */
 
-import type { Ledger } from './ledger';
+import { failureOf, type MemoFailure } from './filing';
+import type { Ledger, Verdict } from './ledger';
 import { parseMemoId } from './pages';
 import type { DomainName, MemoId } from './types';
 
@@ -52,6 +53,42 @@ export function locate(p: Places, id: MemoId): Located | null {
   if (failed) return { domain: failed, state: 'failed' };
   const held = p.domains.find((d) => d.hold.has(id));
   return held ? { domain: held.domain, state: 'held' } : null;
+}
+
+/** When a job reached its terminal line: the clock time darami recorded at commit, or only the line's date. */
+export type Finished = { readonly at: string } | { readonly day: string };
+
+/** A memo as the screens show it: locate()'s answer with what its ledger says about it. */
+export type Placement =
+  | { readonly state: 'inbox' }
+  | { readonly state: 'held'; readonly domain: DomainName }
+  /** `retry`: earlier attempts failed since the latest retry line, and this is the next try. */
+  | { readonly state: 'routed' | 'running'; readonly domain: DomainName; readonly retry: MemoFailure | null }
+  /** `pages`: the applied line's fourth field, paths under wiki/ with `.md`. */
+  | { readonly state: 'ingested'; readonly domain: DomainName; readonly verdict: Verdict; readonly pages: readonly string[]; readonly finished: Finished }
+  | { readonly state: 'failed'; readonly domain: DomainName; readonly failure: MemoFailure; readonly finished: Finished };
+
+/** null when the snapshot names no such memo, or names it only where it was moved out of. */
+export function placementOf(p: Places, id: MemoId): Placement | null {
+  const at = locate(p, id);
+  if (!at) return p.inbox.has(id) ? { state: 'inbox' } : null;
+  if (at.state === 'held') return { state: 'held', domain: at.domain };
+  const ledger = p.domains.find((d) => d.domain === at.domain)!.ledger;
+  const h = ledger.history('ingest', id);
+  const finished = (line: number): Finished => ({ day: ledger.dateOf('ingest', id, line) ?? '' });
+  if (h.terminal?.kind === 'applied') return { state: 'ingested', domain: at.domain, verdict: h.terminal.verdict, pages: h.terminal.pages, finished: finished(h.terminal.line) };
+  if (h.terminal?.kind === 'gave-up') return { state: 'failed', domain: at.domain, failure: failureOf(h.terminal, h.terminal.attempt), finished: finished(h.terminal.line) };
+  return { state: at.state === 'running' ? 'running' : 'routed', domain: at.domain, retry: h.attempts > 0 && h.lastFailure ? failureOf(h.lastFailure, h.attempts) : null };
+}
+
+/** Every memo id the snapshot names, in inbox/, raw/, or hold/. */
+export function memoIds(p: Places): ReadonlySet<MemoId> {
+  const out = new Set(p.inbox);
+  for (const d of p.domains) {
+    for (const id of d.raw) out.add(id);
+    for (const id of d.hold) out.add(id);
+  }
+  return out;
 }
 
 /** The memo ids filed as `<id>.md` among `names`: sidecars and stray names are skipped. */

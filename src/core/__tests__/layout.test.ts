@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseWikiPath, paths, placeForJob, resolvePath, ROOT, shownPath, type WikiPath } from '../layout';
+import { memoDirOf, parseWikiPath, paths, placeForJob, resolvePath, ROOT, shownPath, touchedBy, type WikiPath } from '../layout';
 import type { DomainName } from '../types';
 
 const 스터디 = '스터디' as DomainName;
@@ -72,4 +72,16 @@ test('a path is shown to the model relative to its domain folder', () => {
   assert.equal(shownPath(스터디, '스터디/wiki/RAG.md' as WikiPath), 'wiki/RAG.md');
   assert.equal(shownPath(스터디, '일상/wiki/ME.md' as WikiPath), '../일상/wiki/ME.md');
   assert.equal(shownPath(스터디, '스터디 2/wiki/x.md' as WikiPath), '../스터디 2/wiki/x.md');
+});
+
+test('memo folders are the inbox and each domain\'s raw/ and hold/, and a ledger is a domain\'s wiki/log.md', () => {
+  const at = (p: string) => p as WikiPath;
+  assert.deepEqual(memoDirOf(at('inbox')), { kind: 'inbox' });
+  assert.deepEqual(memoDirOf(at('스터디/raw')), { kind: 'raw', domain: '스터디' });
+  assert.deepEqual(memoDirOf(at('미루기 아카이빙/hold')), { kind: 'hold', domain: '미루기 아카이빙' });
+  for (const not of ['inbox/answers/스터디', 'inbox/.rejected', '스터디/wiki', '스터디/raw/x', '.trash/raw', '_attachments', '']) assert.equal(memoDirOf(at(not)), null, not);
+  assert.deepEqual(touchedBy(at('스터디/hold/a.md')), { kind: 'memo', dir: '스터디/hold', name: 'a.md' });
+  assert.deepEqual(touchedBy(at('inbox/a.md')), { kind: 'memo', dir: 'inbox', name: 'a.md' });
+  assert.deepEqual(touchedBy(at('스터디/wiki/log.md')), { kind: 'ledger' });
+  for (const not of ['스터디/wiki/index.md', '스터디/wiki/sub/log.md', 'inbox/answers/스터디/a.md', 'log.md', 'CLAUDE.md']) assert.equal(touchedBy(at(not)), null, not);
 });

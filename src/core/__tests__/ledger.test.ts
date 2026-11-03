@@ -131,3 +131,12 @@ test('the read table refuses a word with two meanings across locales, or a verdi
   assert.throws(() => readTable([{ ...LEDGER_WORDS.en, retry: 'go → on' }]), /attempt or a move/);
   assert.doesNotThrow(() => readTable([LEDGER_WORDS.en, { ...LEDGER_WORDS.ko, verdicts: { ...LEDGER_WORDS.ko.verdicts, conflict: 'conflict' } }]), 'two locales may share a word with one meaning');
 });
+
+test('a job\'s line keeps the date it was written on, counted as history counts lines', () => {
+  const ledger = parseLedger('# log\n## [2026-10-28] ingest | A | 실패 1/3 | x\n## [2026-10-29] ingest | B | 새 페이지 | -\n## [2026-10-30] ingest | A | 새 페이지 | a.md\n');
+  const t = ledger.history('ingest', 'A').terminal!;
+  assert.equal(ledger.dateOf('ingest', 'A', t.line), '2026-10-30');
+  assert.equal(ledger.dateOf('ingest', 'A', 0), '2026-10-28');
+  assert.equal(ledger.dateOf('ingest', 'A', 2), null);
+  assert.equal(ledger.dateOf('file-answer', 'A', 0), null);
+});

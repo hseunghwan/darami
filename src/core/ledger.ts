@@ -70,6 +70,8 @@ export type JobHistory = {
 export type Ledger = {
   history(kind: JobKind, id: string): JobHistory;
   lineCount(kind: JobKind, id: string): number;
+  /** The `[YYYY-MM-DD]` of the job's `line`-th line, counted from 0 as JobHistory counts them. */
+  dateOf(kind: JobKind, id: string, line: number): string | null;
   failedCount(): number;
 };
 
@@ -171,14 +173,14 @@ export function lineKey(line: string): string | null {
   return m ? `${m[2]}:${m[3]}` : null;
 }
 
-type Raw = { readonly kind: string; readonly id: string; readonly outcome: LedgerOutcome | null };
+type Raw = { readonly date: string; readonly kind: string; readonly id: string; readonly outcome: LedgerOutcome | null };
 
 function parseRaw(text: string): readonly Raw[] {
   const out: Raw[] = [];
   for (const line of text.split('\n')) {
     const m = LINE.exec(line.trimEnd());
     if (!m) continue;
-    out.push({ kind: m[2]!, id: m[3]!, outcome: parseOutcome(m[4]!.trim(), m[5]!.trim()) });
+    out.push({ date: m[1]!, kind: m[2]!, id: m[3]!, outcome: parseOutcome(m[4]!.trim(), m[5]!.trim()) });
   }
   return out;
 }
@@ -222,6 +224,7 @@ export function parseLedger(text: string): Ledger {
   return {
     history: (kind, id) => histories.get(`${kind}:${id}`) ?? EMPTY,
     lineCount: (kind, id) => byKey.get(`${kind}:${id}`)?.length ?? 0,
+    dateOf: (kind, id, line) => byKey.get(`${kind}:${id}`)?.[line]?.date ?? null,
     failedCount: () => [...histories.values()].filter((h) => h.terminal?.kind === 'gave-up').length,
   };
 }
