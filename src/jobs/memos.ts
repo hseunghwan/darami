@@ -17,7 +17,7 @@ import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { readPlaces } from '../core/wiki';
 import { classify, type Unavailable } from '../agent/model';
-import type { Ctx, Engine, HeldMemo, ReleaseResult, RouteReport } from './engine';
+import type { Ctx, Engine, ReleaseResult, RouteReport } from './engine';
 
 export const memoFile = {
   inbox: (id: MemoId) => `${paths.inbox}/${id}.md` as WikiPath,
@@ -56,7 +56,10 @@ async function relocate(fs: Fs, from: WikiPath, to: WikiPath, text: string): Pro
 
 type Decision = { readonly domain: DomainName; readonly routing: Routing };
 
-export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' | 'held' | 'confirm' | 'move' | 'retry' | 'locate'> & { readonly finishMoves: (d: DomainName) => Promise<void> } {
+export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' | 'confirm' | 'move' | 'retry'> & {
+  readonly finishMoves: (d: DomainName) => Promise<void>;
+  readonly refresh: Engine['book']['refresh'];
+} {
   const { fs } = ctx;
   const places = async (config: WikiConfig): Promise<Places> => readPlaces(fs, config, await ctx.journal.running());
 
@@ -162,9 +165,8 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
       return ctx.memoLane(async () => {
         const path = memoFile.inbox(input.id);
         const wrote = await fs.create(path, renderMemoFile({ ...input, attachments: [] }, null));
-        const c = await ctx.config();
-        const at = c.ok ? locate(await places(c.config), input.id) : null;
-        if (at) {
+        const at = ctx.book.located(input.id);
+        if (at && at !== 'inbox') {
           if (wrote === 'created') await fs.remove(path);
           return { kind: 'duplicate', at };
         }
@@ -187,33 +189,24 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
       });
     },
 
-    held() {
+    /** Reads every hold copy, so the book has each one's routing, and removes those a confirm or move cut off after its copy left. A broken config reads the inbox alone. */
+    refresh() {
       return ctx.memoLane(async () => {
         const c = await ctx.config();
-        if (!c.ok) return [];
+        if (!c.ok) return void (await fs.list(paths.inbox));
         const p = await places(c.config);
-        const out: HeldMemo[] = [];
         for (const { domain, hold } of p.domains) {
           for (const id of hold) {
             const file = memoFile.hold(domain, id);
             const parsed = parseMemoFile((await fs.readText(file)) ?? '');
             const at = locate(p, id);
-            if (at && at.state !== 'held') {
-              const raw = memoFile.raw(at.domain, id);
-              if (isMemo(await fs.readText(raw), id)) {
-                await fs.remove(file);
-                continue;
-              }
-              // A confirm or move cut off before its copy was whole: this hold copy is the memo.
-              if (at.state !== 'routed' || !parsed.ok) continue;
-              await fs.remove(raw);
-            }
-            if (!parsed.ok || !parsed.value.routing) continue;
-            const { memo, routing } = parsed.value;
-            out.push({ id, domain, text: memo.text, capturedAt: memo.capturedAt, source: memo.source, routing });
+            if (!at || at.state === 'held') continue;
+            const raw = memoFile.raw(at.domain, id);
+            if (isMemo(await fs.readText(raw), id)) await fs.remove(file);
+            // A confirm or move cut off before its copy was whole: this hold copy is the memo.
+            else if (at.state === 'routed' && parsed.ok) await fs.remove(raw);
           }
         }
-        return out.sort((a, b) => (orderKey(a.capturedAt, a.id) < orderKey(b.capturedAt, b.id) ? -1 : 1));
       });
     },
 
@@ -272,13 +265,6 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
           }
         }
       });
-    },
-
-    async locate(id) {
-      const c = await ctx.config();
-      if (!c.ok) return null;
-      const p = await places(c.config);
-      return locate(p, id) ?? (p.inbox.has(id) ? 'inbox' : null);
     },
   };
 }

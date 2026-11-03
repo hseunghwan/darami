@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderAnswerStaging, renderMemoFile, type AnswerFiling } from '../../core/pages';
-import type { AnswerId, DomainName, MemoId } from '../../core/types';
+import type { AnswerId, DomainName } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
 import { fakeModel, plays, turn, type Script } from '../../agent/__tests__/fake-model';
 import type { EngineEvent } from '../engine';
-import { changed, engineOn, everyKill, Killed, memoryJournal, presetWiki, read, run, NO_SIGNAL, snapshot, template, type Store } from './harness';
+import { changed, engineOn, everyKill, Killed, memoryJournal, placed, presetWiki, read, run, NO_SIGNAL, snapshot, template, type Store } from './harness';
 
 const 스터디 = '스터디' as DomainName;
 const LOG = '스터디/wiki/log.md';
@@ -34,7 +34,7 @@ test('a typed memo with a hint is routed with no model call and filed into its d
   assert.equal(read(w.root, '스터디/wiki/RAG.md'), rag(id));
   assert.match(read(w.root, '스터디/wiki/index.md'), /\n- \[\[스터디\/wiki\/RAG\|RAG\]\] - 청크 크기와 검색\n/);
   assert.equal(read(w.root, `스터디/raw/${id}.md`), renderMemoFile({ ...memo(1, 'RAG 청크 512', { domain_hint: '스터디' }), attachments: [] }, { by: 'hint' }));
-  assert.deepEqual(await w.engine.locate(id as MemoId), { domain: 스터디, state: 'ingested' });
+  assert.deepEqual(await placed(w.engine, id), { domain: 스터디, state: 'ingested' });
   assert.deepEqual(await run(w.engine, '스터디'), { kind: 'idle' });
   assert.deepEqual(w.events.filter((e) => e.kind === 'started'), [{ kind: 'started', job: { kind: 'ingest', domain: 스터디, id }, attempt: 1 }]);
   assert.equal(w.store.rows(), 0);
@@ -165,7 +165,7 @@ test('three failed attempts give up with a _review.md note, each retry told why 
   assert.equal(prompts.length, 3);
   assert.ok(!prompts[0]!.includes('지난 시도'));
   assert.ok(prompts[1]!.includes(`이유: ${reason}`));
-  assert.deepEqual(await w.engine.locate(id as MemoId), { domain: 스터디, state: 'failed' });
+  assert.deepEqual(await placed(w.engine, id), { domain: 스터디, state: 'failed' });
 });
 
 test('a model that fails the run, or never finishes, fails the attempt with rule llm', async () => {

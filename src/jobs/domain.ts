@@ -4,7 +4,7 @@
  */
 
 import type { DomainConfig, WikiConfig } from '../core/config';
-import { dayIn, ingestInstructions } from '../core/filing';
+import { committedPages, dayIn, ingestInstructions } from '../core/filing';
 import { paths, type WikiPath } from '../core/layout';
 import type { Ledger, VerdictId } from '../core/ledger';
 import {
@@ -99,6 +99,11 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName) => Promise<voi
 
   async function settle(dc: DomainConfig, t: Text, tx: JobTx, job: JobRef, problems: readonly Problem[], verdict: VerdictId | null): Promise<RunReport> {
     if (verdict && problems.length === 0) {
+      // Before the applied line: a commit never lands without its record, and a record whose line never landed counts for nothing.
+      if (job.kind === 'ingest') {
+        const { changes, contents } = tx.changes();
+        await ctx.book.recordCommit(dc.name, job.id as MemoId, committedPages(dc.name, changes, contents));
+      }
       await tx.commit(verdict, await indexOf(dc, t));
       return { kind: 'committed', job, verdict };
     }

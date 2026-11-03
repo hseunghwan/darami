@@ -7,9 +7,10 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import type { WikiPath } from '../../core/layout';
 import type { DomainName } from '../../core/types';
-import { sqliteJournal, type Sql } from '../sqlite';
+import type { BookStore, MemoHeader } from '../book';
+import { sqliteBook, sqliteJournal, type Sql } from '../sqlite';
 import type { JournalStore } from '../transaction';
-import { memoryJournal } from './harness';
+import { memoryBook, memoryJournal } from './harness';
 
 const 스터디 = '스터디' as DomainName;
 const 일상 = '일상' as DomainName;
@@ -83,4 +84,39 @@ test('the SQL store sees only its own folder, and keeps rows across a reopen of 
   const again = sqliteJournal('content://a', async () => nodeSql(d));
   assert.deepEqual((await again.heads()).map((h) => h.job), [job]);
   assert.deepEqual(await again.befores(스터디, 'job'), [[at('스터디/wiki/a.md'), 'x']]);
+});
+
+const header = (n: number, preview = `메모 ${n}`): MemoHeader => ({
+  id: `01JB8ZQ4M3T9X7K2W5R6N8P00${n}` as MemoHeader['id'], capturedAt: '2026-10-29T08:01:00+09:00', tz: 'Asia/Seoul', source: 'typed', preview, place: n === 1 ? '중구' : null, photos: 0,
+});
+const commit = (pages: string[]) => ({ domain: 스터디, id: header(1).id, at: '2026-10-29T00:00:00.000Z', pages: pages.map((p) => ({ pathUnderWiki: p, change: 'created' as const, type: 'concept' })) });
+
+const books: [string, () => BookStore][] = [
+  ['memory', () => memoryBook()],
+  ['sqlite', () => sqliteBook('content://tree/primary%3ADocuments%2Fwiki', async () => nodeSql())],
+];
+
+describe.each(books)('the %s book store', (_, make) => {
+  test('a header stays as first stored, and a commit record is replaced by the next one for the same memo', async () => {
+    const s = make();
+    await s.putHeaders([header(1), header(2)]);
+    await s.putHeaders([header(1, 'changed')]);
+    await s.putCommit(commit(['First.md']));
+    await s.putCommit(commit(['Second.md']));
+    const { headers, commits } = await s.load();
+    assert.deepEqual([...headers].sort((a, b) => a.id.localeCompare(b.id)), [header(1), header(2)]);
+    assert.deepEqual(commits, [commit(['Second.md'])]);
+  });
+});
+
+test('the SQL book store sees only its own folder, and drops a row a hand edit broke', async () => {
+  const d = new DatabaseSync(':memory:');
+  const a = sqliteBook('content://a', async () => nodeSql(d));
+  await a.putHeaders(Array.from({ length: 120 }, (_, i) => ({ ...header(1), id: `01JB8ZQ4M3T9X7K2W5R6N8${String(i).padStart(4, '0')}` as MemoHeader['id'] })));
+  await a.putCommit(commit(['RAG.md']));
+  assert.deepEqual(await sqliteBook('content://b', async () => nodeSql(d)).load(), { headers: [], commits: [] });
+  d.exec(`UPDATE memo_header SET source = 'fax' WHERE id = '01JB8ZQ4M3T9X7K2W5R6N80000'; UPDATE memo_commit SET pages = 'not json'`);
+  const { headers, commits } = await sqliteBook('content://a', async () => nodeSql(d)).load();
+  assert.equal(headers.length, 119);
+  assert.deepEqual(commits, []);
 });

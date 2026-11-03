@@ -6,7 +6,7 @@ import type { DomainName, MemoId } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
 import { fakeModel, turn, type Reply, type Script } from '../../agent/__tests__/fake-model';
-import { changed, engineOn, everyKill, memoryJournal, presetWiki, read, run, NO_SIGNAL, snapshot, template } from './harness';
+import { changed, engineOn, everyKill, memoryJournal, placed, presetWiki, read, run, NO_SIGNAL, snapshot, template } from './harness';
 
 const 스터디 = '스터디' as DomainName;
 const 일상 = '일상' as DomainName;
@@ -43,28 +43,30 @@ async function gaveUpMemo() {
   return w;
 }
 
-test('held lists hold copies oldest first with their routing, and confirm moves one into raw/ byte for byte', async () => {
+test('the book lists held memos with their routing, and confirm moves one into raw/ byte for byte', async () => {
   const w = await heldMemo();
-  const held = await w.engine.held();
-  assert.deepEqual(held, [{ id: ID, domain: 스터디, text: '애매한 메모', capturedAt: '2026-10-29T08:01:00+09:00', source: 'typed', routing: { by: 'classifier', confidence: 0.4, reason: '애매함' } }]);
+  await w.engine.book.refresh();
+  assert.deepEqual(w.engine.book.current().held, [{ id: ID, capturedAt: '2026-10-29T08:01:00+09:00', preview: '애매한 메모', source: 'typed', at: { state: 'held', domain: 스터디 }, routing: { by: 'classifier', confidence: 0.4, reason: '애매함' } }]);
   const holdText = read(w.root, `스터디/hold/${ID}.md`);
   assert.deepEqual(await w.engine.confirm(ID), { kind: 'released', domain: 스터디 });
   assert.equal(read(w.root, `스터디/raw/${ID}.md`), holdText);
   assert.equal(exists(w.root, `스터디/hold/${ID}.md`), false);
-  assert.deepEqual(await w.engine.held(), []);
+  assert.deepEqual(w.engine.book.current().held, []);
   assert.deepEqual(await w.engine.confirm(ID), { kind: 'conflict', at: { domain: 스터디, state: 'routed' } });
   assert.deepEqual(await w.engine.confirm(ulid(9) as MemoId), { kind: 'not-found' });
 });
 
-test('held finishes a confirm cut off: a whole raw copy wins over the hold copy, and a torn one goes', async () => {
+test('refresh finishes a confirm cut off: a whole raw copy wins over the hold copy, and a torn one goes', async () => {
   const w = await heldMemo();
   const holdText = read(w.root, `스터디/hold/${ID}.md`);
   writeFileSync(join(w.root, '스터디', 'raw', `${ID}.md`), holdText.slice(0, 30));
-  assert.equal((await w.engine.held()).length, 1, 'a raw copy cut off is not the memo');
-  assert.equal(exists(w.root, `스터디/raw/${ID}.md`), false, 'and it goes, so confirm can run again');
+  await w.engine.book.refresh();
+  assert.equal(exists(w.root, `스터디/raw/${ID}.md`), false, 'a raw copy cut off is not the memo, and it goes, so confirm can run again');
+  assert.equal(w.engine.book.current().held.length, 1);
   assert.deepEqual(await w.engine.confirm(ID), { kind: 'released', domain: 스터디 });
   writeFileSync(join(w.root, '스터디', 'hold', `${ID}.md`), holdText);
-  assert.deepEqual(await w.engine.held(), [], 'a whole raw copy is the memo');
+  await w.engine.book.refresh();
+  assert.deepEqual(w.engine.book.current().held, [], 'a whole raw copy is the memo');
   assert.equal(exists(w.root, `스터디/hold/${ID}.md`), false);
 });
 
@@ -97,7 +99,7 @@ test('moving a memo back into a domain that closed it writes a retry line there 
   writeFileSync(join(w.root, '일상', 'wiki', 'log.md'), `# log\n${[1, 2, 3].map((k) => `## [2026-10-29] ingest | ${ID} | ${k < 3 ? '실패' : '포기'} ${k}/3 | x\n`).join('')}`);
   assert.deepEqual(await w.engine.move(ID, 스터디), { kind: 'released', domain: 스터디 });
   assert.ok(read(w.root, '스터디/wiki/log.md').endsWith(`## [2026-10-29] ingest | ${ID} | 이동 → 일상 | -\n## [2026-10-29] ingest | ${ID} | 재시도 | -\n`));
-  assert.deepEqual(await w.engine.locate(ID), { domain: 스터디, state: 'routed' });
+  assert.deepEqual(await placed(w.engine, ID), { domain: 스터디, state: 'routed' });
 });
 
 test('retry reopens a gave-up memo with its attempts reset, and only a gave-up one', async () => {
@@ -114,7 +116,7 @@ test('a move cut off after its copy, or after its line, is finished by the next 
     const text = renderMemoFile({ ...memo(1, '메모', { domain_hint: '스터디' }), attachments: [] }, { by: 'user', from: 스터디, previous: { by: 'hint' } });
     writeFileSync(join(w.root, '일상', 'raw', `${ID}.md`), text);
     if (cut === 'after the line') writeFileSync(join(w.root, '스터디', 'wiki', 'log.md'), `${read(w.root, '스터디/wiki/log.md')}## [2026-10-29] ingest | ${ID} | 이동 → 일상 | -\n`);
-    assert.deepEqual(await w.engine.locate(ID), { domain: 일상, state: 'routed' }, cut);
+    assert.deepEqual(await placed(w.engine, ID), { domain: 일상, state: 'routed' }, cut);
     assert.deepEqual(await run(w.engine, '스터디'), { kind: 'idle' }, cut);
     assert.equal(exists(w.root, `스터디/raw/${ID}.md`), false, cut);
     assert.equal(read(w.root, '스터디/wiki/log.md').split('이동 → 일상').length, 2, `${cut}: one moved line`);
@@ -141,7 +143,7 @@ test('a kill anywhere in moving a gave-up memo, and again when the move is tried
     },
     check: async (root, store, where) => {
       const e = await engineOn(nodeFs(root), store, model);
-      assert.deepEqual(await e.locate(ID), { domain: 일상, state: 'routed' }, where);
+      assert.deepEqual(await placed(e, ID), { domain: 일상, state: 'routed' }, where);
       assert.equal(exists(root, `스터디/raw/${ID}.md`), false, where);
       assert.equal(exists(root, `스터디/raw/${ID}.source.md`), false, where);
       assert.equal(read(root, `일상/raw/${ID}.source.md`), '---\nmemo: x\n---\n본문\n', where);

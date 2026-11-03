@@ -119,3 +119,10 @@ test('outside src/jobs, only the engine, the runner, and the SQLite store are im
   const leaks = outside.flatMap((s) => s.imports.filter((i) => i.to !== null && i.to.startsWith(jobs + '/') && !open.has(i.to)).map((i) => `${name(s.path)}: ${i.spec}`));
   assert.deepEqual(leaks, []);
 });
+
+test('only engine.ts touches the Fs and journal the engine was given, so every read and write reaches the memo book', () => {
+  const jobs = sources(join(SRC, 'jobs'));
+  assert.ok(jobs.some((s) => name(s.path) === join('jobs', 'book.ts')), 'the scan sees the book');
+  const leaks = jobs.filter((s) => s.path !== join(SRC, 'jobs', 'engine.ts') && /\bdeps\.(fs|journal)\b/.test(s.text)).map((s) => name(s.path));
+  assert.deepEqual(leaks, []);
+});
