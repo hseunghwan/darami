@@ -21,7 +21,7 @@ import { parseStoredPairing, type Pairing } from './lib/pairing';
 import { attachmentsOf, type DraftPhoto } from './lib/photos';
 import type { StatusResponse } from './lib/wire';
 import { openEngine, type AcceptResult, type Engine, type EngineEvent } from './jobs/engine';
-import { createRunner, type RunnerReport } from './jobs/runner';
+import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
 
@@ -34,11 +34,10 @@ export type Folder = {
   readonly state: FolderState | null;
 };
 
-/** What the screens show about jobs. P4 renders it. */
+/** What the screens show about jobs. A running job is in the memo book. */
 export type JobsView = {
-  readonly running: { readonly domain: string; readonly id: string } | null;
-  /** Model work waits until `until`; `login` means the user must log in again. */
-  readonly paused: { readonly until: number; readonly cause: string } | null;
+  /** runner.schedule().pause after the last pass: null once it ran out or a login or the network ended it. */
+  readonly paused: Pause | null;
   readonly last: RunnerReport | null;
 };
 
@@ -59,7 +58,7 @@ export type App = {
 
 let app: App = {
   ready: false, pairing: null, domains: [], reachable: null, authLost: false, settings: { location: false, theme: 'system' }, folder: null,
-  jobs: { running: null, paused: null, last: null },
+  jobs: { paused: null, last: null },
 };
 const listeners = new Set<() => void>();
 
@@ -170,10 +169,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       model: phoneModel,
       machine: MACHINE,
       now: () => new Date(),
-      onEvent: (e) => {
-        if (e.kind === 'started') set({ jobs: { ...app.jobs, running: { domain: e.job.domain, id: e.job.id } } });
-        note(e);
-      },
+      onEvent: note,
     });
     const mine = { uri: folder.tree.uri, engine };
     opened = mine;
@@ -193,9 +189,12 @@ const runner = createRunner({
   },
   now: Date.now,
   onReport: (r) => {
-    const { pause } = runner.schedule();
-    set({ jobs: { running: null, paused: pause && pause.until > Date.now() ? pause : null, last: r } });
+    set({ jobs: { ...app.jobs, last: r } });
     note(r);
+  },
+  onSettled: () => {
+    const { pause } = runner.schedule();
+    if (pause !== app.jobs.paused) set({ jobs: { ...app.jobs, paused: pause } });
   },
 });
 

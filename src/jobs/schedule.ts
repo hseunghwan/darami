@@ -44,6 +44,9 @@ export function afterRun(s: Schedule, d: DomainName, r: RunReport, now: number):
   return { ...ran, backoff };
 }
 
+/** A pause whose time has passed is over. */
+export const expire = (s: Schedule, now: number): Schedule => (s.pause && now >= s.pause.until ? { ...s, pause: null } : s);
+
 /** The user logged in again: a login pause ends now. */
 export const afterLogin = (s: Schedule): Schedule => (s.pause?.cause === 'login' ? { ...s, pause: null } : s);
 /** The network came back: a network or server pause ends now. */

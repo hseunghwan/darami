@@ -26,7 +26,7 @@ async function filedWiki() {
   return { root, fs, e };
 }
 
-const runnerOn = (e: Engine) => createRunner({ engine: async () => e, setTimer: () => () => {}, now: () => 0, onReport: () => {} });
+const runnerOn = (e: Engine) => createRunner({ engine: async () => e, setTimer: () => () => {}, now: () => 0, onReport: () => {}, onSettled: () => {} });
 
 test('an idle pass lists each memo folder once, and reads each ledger once', async () => {
   const w = await filedWiki();

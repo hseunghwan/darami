@@ -16,7 +16,10 @@ import { FolderUnreachable } from '../core/fs';
 import type { DomainName } from '../core/types';
 import { createFlusher, type FlushResult } from '../lib/flusher';
 import type { Engine, RouteReport, RunReport } from './engine';
-import { afterLogin, afterNetwork, afterRoute, afterRun, modelAllowed, rotation, START, wakeIn, type Schedule } from './schedule';
+import { afterLogin, afterNetwork, afterRoute, afterRun, expire, modelAllowed, rotation, START, wakeIn, type Schedule } from './schedule';
+
+/** Model work waits until `until`. */
+export type Pause = NonNullable<Schedule['pause']>;
 
 export type RunnerReport =
   | ({ readonly where: 'router' } & Exclude<RouteReport, { readonly kind: 'idle' }>)
@@ -34,6 +37,7 @@ export type Runner = {
   resume(): Promise<void>;
   /** Leaving the foreground cancels the running job, which rolls back with no line and no attempt spent. */
   setForeground(foreground: boolean): void;
+  /** Never a pause that is over. */
   schedule(): Schedule;
 };
 
@@ -43,6 +47,8 @@ export type RunnerDeps = {
   readonly setTimer: (ms: number, fire: () => void) => () => void;
   readonly now: () => number;
   readonly onReport: (r: RunnerReport) => void;
+  /** After every pass, and when a login or the network ends a pause: an idle pass reports nothing, so this is when a pause shown as on can turn off. */
+  readonly onSettled: () => void;
 };
 
 const DRAINED: FlushResult = { kind: 'drained' };
@@ -52,6 +58,7 @@ export function createRunner(deps: RunnerDeps): Runner {
   let foreground = true;
 
   async function pass(signal: AbortSignal): Promise<FlushResult> {
+    s = expire(s, deps.now());
     if (!foreground) return DRAINED;
     try {
       const engine = await deps.engine();
@@ -93,16 +100,18 @@ export function createRunner(deps: RunnerDeps): Runner {
     }
   }
 
-  const flusher = createFlusher({ pass, setTimer: deps.setTimer, onResult: () => {} });
+  const flusher = createFlusher({ pass, setTimer: deps.setTimer, onResult: () => deps.onSettled() });
 
   return {
     trigger: () => flusher.trigger(),
     loggedIn() {
       s = afterLogin(s);
+      deps.onSettled();
       return flusher.trigger();
     },
     networkBack() {
       s = afterNetwork(s);
+      deps.onSettled();
       return flusher.trigger();
     },
     resume: () => flusher.resume(),
@@ -110,6 +119,6 @@ export function createRunner(deps: RunnerDeps): Runner {
       foreground = next;
       flusher.setForeground(next);
     },
-    schedule: () => s,
+    schedule: () => (s = expire(s, deps.now())),
   };
 }
