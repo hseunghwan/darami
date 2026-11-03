@@ -4,12 +4,15 @@ import type { OutboxFile, OutboxRow, OutboxStore } from './outbox';
 
 let opened: Promise<SQLite.SQLiteDatabase> | null = null;
 
-function db(): Promise<SQLite.SQLiteDatabase> {
+export function db(): Promise<SQLite.SQLiteDatabase> {
   opened ??= (async () => {
     // The name predates dotoriwiki. Renaming it would strand the outbox of a phone that upgrades.
     const d = await SQLite.openDatabaseAsync('llmwiki.db');
+    // synchronous FULL: under WAL, NORMAL can lose the last commit to a power cut, and the job
+    // journal (jobs/sqlite.ts) must never lose a before-image it was told it has.
     await d.execAsync(`
       PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = FULL;
       CREATE TABLE IF NOT EXISTS outbox (
         id TEXT PRIMARY KEY NOT NULL,
         body TEXT NOT NULL,

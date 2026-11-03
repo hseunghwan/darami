@@ -110,3 +110,12 @@ test('only jobs/transaction.ts writes or removes a log.md', () => {
   const writers = engine.filter((s) => /\.(write|remove)\(\s*paths\.log\(/.test(s.text) || /\.(write|remove)\(\s*log\b/.test(s.text)).map((s) => name(s.path));
   assert.deepEqual(writers, [join('jobs', 'transaction.ts')]);
 });
+
+test('outside src/jobs, only the engine, the runner, and the SQLite store are imported', () => {
+  const jobs = join(SRC, 'jobs');
+  const open = new Set(['engine', 'runner', 'sqlite'].map((f) => join(jobs, f)));
+  const outside = sources(SRC).filter((s) => !s.path.startsWith(jobs + '/'));
+  assert.ok(outside.some((s) => name(s.path) === 'state.ts'), 'the scan sees the app');
+  const leaks = outside.flatMap((s) => s.imports.filter((i) => i.to !== null && i.to.startsWith(jobs + '/') && !open.has(i.to)).map((i) => `${name(s.path)}: ${i.spec}`));
+  assert.deepEqual(leaks, []);
+});

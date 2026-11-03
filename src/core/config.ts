@@ -179,9 +179,10 @@ function parseDomain(name: DomainName, v: unknown, machine: MachineFacts, add: A
   let modelProfile: ModelProfile | null = null;
   const profile = f.get('model_profile');
   if (profile !== undefined && profile !== null) {
-    if (typeof profile !== 'string' || profile.trim() === '') add(`${at}.model_profile`, `is ${JSON.stringify(profile)}`, 'name a key of the `edit` map in models.json');
+    const known = [...machine.modelProfiles].join(', ') || 'none';
+    if (typeof profile !== 'string' || profile.trim() === '') add(`${at}.model_profile`, `is ${JSON.stringify(profile)}`, `name a model profile darami knows (${known}), or remove it`);
     else if (!machine.modelProfiles.has(profile.normalize('NFC'))) {
-      warnings.push({ key: `${at}.model_profile`, problem: `${profile} is not in this machine's models.json, so ${name} runs on edit.default`, fix: `add edit.${profile} to models.json, or remove model_profile` });
+      warnings.push({ key: `${at}.model_profile`, problem: `${profile} is not a model profile darami knows (${known}), so ${name} runs on the default model`, fix: `use one of ${known}, or remove model_profile` });
     } else modelProfile = profile.normalize('NFC') as ModelProfile;
   }
   const pageTypes: PageTypeSpec[] = [];
