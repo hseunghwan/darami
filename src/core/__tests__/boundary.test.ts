@@ -95,3 +95,11 @@ test('src/agent and src/jobs load under jest: no expo or react-native, at any de
   const leaks = engine.flatMap((s) => [...packagesLoadedBy(s.path, byPath)].filter((p) => /^(expo|react-native|react$)/.test(p)).map((p) => `${name(s.path)}: ${p}`));
   assert.deepEqual(leaks, []);
 });
+
+test('src/agent reaches files only through a Workspace: it imports no Fs, no folder reader, and nothing from src/jobs', () => {
+  const agent = sources(join(SRC, 'agent'));
+  assert.ok(agent.some((s) => name(s.path) === join('agent', 'loop.ts')), 'the scan sees the loop');
+  const banned = (to: string) => to.startsWith(join(SRC, 'fs') + '/') || to.startsWith(join(SRC, 'jobs') + '/') || to === join(CORE, 'fs') || to === join(CORE, 'wiki');
+  const leaks = agent.flatMap((s) => s.imports.filter((i) => i.to !== null && banned(i.to)).map((i) => `${name(s.path)}: ${i.spec}`));
+  assert.deepEqual(leaks, []);
+});
