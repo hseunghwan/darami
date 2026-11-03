@@ -1,15 +1,17 @@
 /**
- * A wiki folder read through the Fs port. The only engine module that touches files; every other
- * module gets strings (boundary.test.ts).
+ * A wiki folder read and set up through the Fs port. The only engine module that touches files;
+ * every other module gets strings (boundary.test.ts).
  *
  * The config rule, from dotoriwiki's index.ts: every caller that needs the configuration reads
  * dotoriwiki.yaml, then checks that the CLAUDE.md files it needs exist. While that fails the wiki
  * is paused, and the caller shows the problems. The next read after a fix resumes.
  */
 
-import { parseWikiConfig, type ConfigParse, type ConfigProblem, type MachineFacts } from './config';
-import type { Fs } from './fs';
-import { paths, resolvePath, type WikiPath } from './layout';
+import { parseWikiConfig, type ConfigParse, type ConfigProblem, type MachineFacts, type WikiConfig } from './config';
+import { FolderUnreachable, type Fs } from './fs';
+import { paths, resolvePath, ROOT, type WikiPath } from './layout';
+import { presetFiles, unfinishedPreset } from './presets';
+import type { Locale } from './types';
 
 /** null when the folder has no dotoriwiki.yaml. A missing CLAUDE.md is one of the problems. */
 export async function readConfig(fs: Fs, machine: MachineFacts): Promise<ConfigParse | null> {
@@ -49,4 +51,65 @@ async function inline(fs: Fs, path: WikiPath, text: string, seen: ReadonlySet<Wi
     out.push(target && inner !== null ? (await inline(fs, target, inner, new Set([...seen, path]))).trimEnd() : line);
   }
   return out.join('\n');
+}
+
+/**
+ * What a folder holds, as the app has to act on it. Derived from the folder on every call and never
+ * stored, so an edit made in Obsidian shows on the next inspect. Dot names (.stfolder, .obsidian,
+ * .trash, .gitignore) count for nothing here.
+ */
+export type FolderState =
+  | { readonly kind: 'empty' }
+  /** No config or an empty one, and only names a `locale` preset puts at the root: a copy that stopped part way. */
+  | { readonly kind: 'unfinished'; readonly locale: Locale }
+  | { readonly kind: 'wiki'; readonly config: WikiConfig; readonly warnings: readonly ConfigProblem[] }
+  /** Paused until fixed, by the config rule above. */
+  | { readonly kind: 'broken'; readonly problems: readonly ConfigProblem[] }
+  /** Files that are neither a wiki nor a preset copy. `names` is the first few visible root names. */
+  | { readonly kind: 'foreign'; readonly names: readonly string[] }
+  | { readonly kind: 'unreachable' };
+
+export type SetUp = { readonly locale: Locale; readonly zone: string | undefined; readonly machine: MachineFacts };
+
+const FOREIGN_SHOWN = 3;
+
+/** `preferred` picks the locale when a cut-off copy fits both presets. */
+export async function inspectFolder(fs: Fs, machine: MachineFacts, preferred: Locale): Promise<FolderState> {
+  try {
+    const visible = (await fs.list(ROOT)).filter((n) => !n.startsWith('.'));
+    if (visible.length === 0) return { kind: 'empty' };
+    const text = await fs.readText(paths.config);
+    // An empty config is what a copy killed between making the file and writing it leaves.
+    if (text === null || text === '') {
+      const locale = unfinishedPreset(visible, preferred);
+      return locale ? { kind: 'unfinished', locale } : { kind: 'foreign', names: visible.slice(0, FOREIGN_SHOWN) };
+    }
+    const parsed = await withSchemas(fs, parseWikiConfig(text, machine));
+    return parsed.ok ? { kind: 'wiki', config: parsed.config, warnings: parsed.warnings } : { kind: 'broken', problems: parsed.problems };
+  } catch (e) {
+    if (e instanceof FolderUnreachable) return { kind: 'unreachable' };
+    throw e;
+  }
+}
+
+/**
+ * Writes the preset into an empty folder, or finishes a cut-off copy in that copy's locale, and
+ * answers the folder's new state. Any other folder is answered as it is and not written to.
+ *
+ * Idempotent: every write is create, which never replaces text and fills an empty file, so a rerun
+ * after a kill at any point writes exactly what is still missing. A kill inside one file's single
+ * write can leave a prefix that a rerun keeps; for dotoriwiki.yaml that reads as broken.
+ */
+export async function setUpWiki(fs: Fs, setUp: SetUp): Promise<FolderState> {
+  const before = await inspectFolder(fs, setUp.machine, setUp.locale);
+  const locale = before.kind === 'empty' ? setUp.locale : before.kind === 'unfinished' ? before.locale : null;
+  if (locale === null) return before;
+  try {
+    // One at a time: the order is what keeps a cut-off copy from reading as a wiki.
+    for (const f of presetFiles(locale, setUp.zone)) await fs.create(f.path, f.text);
+  } catch (e) {
+    if (e instanceof FolderUnreachable) return { kind: 'unreachable' };
+    throw e;
+  }
+  return inspectFolder(fs, setUp.machine, setUp.locale);
 }
