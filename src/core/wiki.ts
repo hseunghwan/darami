@@ -10,8 +10,10 @@
 import { parseWikiConfig, type ConfigParse, type ConfigProblem, type MachineFacts, type WikiConfig } from './config';
 import { FolderUnreachable, type Fs } from './fs';
 import { paths, resolvePath, ROOT, type WikiPath } from './layout';
+import { parseLedger, type Ledger } from './ledger';
+import { memoIdsIn, type Places } from './places';
 import { presetFiles, unfinishedPreset } from './presets';
-import type { Locale } from './types';
+import type { DomainName, Locale } from './types';
 
 /** null when the folder has no dotoriwiki.yaml. A missing CLAUDE.md is one of the problems. */
 export async function readConfig(fs: Fs, machine: MachineFacts): Promise<ConfigParse | null> {
@@ -112,4 +114,21 @@ export async function setUpWiki(fs: Fs, setUp: SetUp): Promise<FolderState> {
     throw e;
   }
   return inspectFolder(fs, setUp.machine, setUp.locale);
+}
+
+/** <d>/wiki/log.md parsed; a missing file is an empty ledger. */
+export async function readLedger(fs: Fs, d: DomainName): Promise<Ledger> {
+  return parseLedger((await fs.readText(paths.log(d))) ?? '');
+}
+
+/**
+ * Where memos are, read fresh: the inbox, and each declared domain's raw/, hold/, and log.md. Never
+ * cached, because Obsidian and Syncthing change the same folder.
+ */
+export async function readPlaces(fs: Fs, config: WikiConfig, running: Places['running']): Promise<Places> {
+  const domains = [];
+  for (const d of config.domains.keys()) {
+    domains.push({ domain: d, raw: memoIdsIn(await fs.list(paths.raw(d))), hold: memoIdsIn(await fs.list(paths.hold(d))), ledger: await readLedger(fs, d) });
+  }
+  return { inbox: memoIdsIn(await fs.list(paths.inbox)), domains, running };
 }

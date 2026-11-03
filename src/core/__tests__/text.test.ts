@@ -20,6 +20,7 @@ function everything(t: Text): string[] {
     t.ingest.rules({ date: '2026-10-29', fields: ['type', 'summary'], types: ['concept', 'case'] }),
     t.ingest.prompt({ id: 'A', hasSource: true, photos, lastFailure: 'empty x.md: page has no body' }),
     t.ingest.prompt({ id: 'A', hasSource: false, photos: [...photos, ...photos], lastFailure: null }),
+    t.ingest.workspace('learning'), t.ingest.nudge,
     t.chatRules('root'), t.chatRules('domain'),
     renderIndex('learning', pages, ['concept'], t),
     t.reviewTitle, t.answer.cited, t.answer.none,
@@ -49,9 +50,9 @@ const before = (date: string, types: readonly string[]) => `## 서버가 정한 
 - \`[[링크]]\`는 이미 있거나 이번에 만드는 위키 페이지에만 건다. 원본 id는 링크로 걸지 말고 \`sources\`와 본문에 글자로 적는다.
 - 사진은 원본에 붙은 것만 \`![[파일명]]\`으로 넣는다. 사진에서 보이는 내용은 사진에서 본 것이라고 밝혀 적는다.
 - 빈 파일이나 본문 없는 페이지를 만들지 않는다.
-- 끝나면 판정(\`verdict\`)과 만들거나 고친 페이지의 \`wiki/\` 기준 경로 목록(\`pages\`)을 구조화된 응답으로 돌려준다.`;
+- 끝나면 \`finish\` 도구로 판정(\`verdict\`)을 돌려준다. 이것이 구조화된 응답이다.`;
 
-test('a Korean wiki keeps the rules it had, plus the verdict list the id enum needs', () => {
+test('a Korean wiki keeps the rules it had, with the answer given by the finish tool, plus the verdict list the id enum needs', () => {
   const now = textFor('ko').ingest.rules({ date: '2026-10-29', fields: ['type', 'summary'], types: ['concept', 'case'] });
   const old = before('2026-10-29', ['concept', 'case']);
   assert.ok(now.startsWith(old), now);

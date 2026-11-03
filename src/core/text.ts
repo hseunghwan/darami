@@ -35,6 +35,10 @@ export type Text = {
   readonly ingest: {
     rules(a: { readonly date: string; readonly fields: readonly string[]; readonly types: readonly string[] }): string;
     prompt(a: IngestPromptArgs): string;
+    /** The in-app tools, in place of the section dotoriwiki gave each CLI agent. */
+    workspace(domain: string): string;
+    /** Sent when a turn ends with no tool call. */
+    readonly nudge: string;
   };
   chatRules(target: 'root' | 'domain'): string;
 
