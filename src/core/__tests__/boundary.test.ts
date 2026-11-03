@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '..', '..');
@@ -65,5 +65,33 @@ test('no file outside src/fs imports the node adapter, tests aside', () => {
   assert.ok(outside.some((s) => name(s.path) === join('core', 'ledger.ts')), 'the scan sees the app and the engine');
   const node = join(SRC, 'fs', 'node');
   const leaks = outside.filter((s) => s.imports.some((i) => i.to === node)).map((s) => name(s.path));
+  assert.deepEqual(leaks, []);
+});
+
+/** The packages a file loads, through every relative import it makes, at any depth. */
+function packagesLoadedBy(path: string, byPath: ReadonlyMap<string, Source>): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<string>();
+  const walk = (p: string) => {
+    if (seen.has(p)) return;
+    seen.add(p);
+    const s = byPath.get(p) ?? byPath.get(join(p, 'index'));
+    if (!s) return;
+    for (const i of s.imports) {
+      if (i.to === null) out.add(i.spec);
+      else walk(i.to);
+    }
+  };
+  walk(withoutExt(path));
+  return out;
+}
+
+test('src/agent and src/jobs load under jest: no expo or react-native, at any depth, outside the two files that bind the phone', () => {
+  const all = sources(SRC);
+  const byPath = new Map(all.map((s) => [withoutExt(s.path), s]));
+  const bound = new Set([join(SRC, 'agent', 'codex.ts'), join(SRC, 'jobs', 'sqlite.ts')]);
+  const engine = ['agent', 'jobs'].map((d) => join(SRC, d)).filter(existsSync).flatMap((d) => sources(d)).filter((s) => !bound.has(s.path));
+  assert.ok(engine.some((s) => name(s.path) === join('jobs', 'transaction.ts')), 'the scan sees the jobs');
+  const leaks = engine.flatMap((s) => [...packagesLoadedBy(s.path, byPath)].filter((p) => /^(expo|react-native|react$)/.test(p)).map((p) => `${name(s.path)}: ${p}`));
   assert.deepEqual(leaks, []);
 });
