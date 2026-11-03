@@ -59,7 +59,7 @@ test('feeds name a declared domain; model_profile resolves against the machine o
   assert.equal(r.config.domains.get('learning' as never)!.modelProfile, 'strong');
   assert.equal(r.config.domains.get('someday' as never)!.modelProfile, null);
   assert.deepEqual(r.warnings.map((w) => w.key), ['domains.someday.model_profile']);
-  assert.match(r.warnings[0]!.problem, /huge is not in this machine's models\.json, so someday runs on edit\.default/);
+  assert.match(r.warnings[0]!.problem, /huge is not a model profile darami knows \(default, strong\), so someday runs on the default model/);
 });
 
 test('each broken variant reports every one of its problems, each with a key and a fix', () => {

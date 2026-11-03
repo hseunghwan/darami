@@ -53,9 +53,9 @@ export function createRunner(deps: RunnerDeps): Runner {
 
   async function pass(signal: AbortSignal): Promise<FlushResult> {
     if (!foreground) return DRAINED;
-    const engine = await deps.engine();
-    if (!engine) return DRAINED;
     try {
+      const engine = await deps.engine();
+      if (!engine) return DRAINED;
       for (;;) {
         const domains = await engine.domains();
         if (!domains || signal.aborted) return DRAINED;

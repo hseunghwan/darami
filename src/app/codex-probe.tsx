@@ -10,6 +10,7 @@ import { Linking, ScrollView, Text, View } from 'react-native';
 import { completeDeviceLogin, requestDeviceCode, type DeviceCode } from '../codex/auth';
 import { runTurn, type FunctionTool, type InputItem, type TurnRequest } from '../codex/responses';
 import { clearTokens, credentials, loadTokens, saveTokens } from '../codex/session';
+import { jobsLoggedIn } from '../state';
 import { Card, Header, PrimaryButton, Screen, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
 
@@ -54,6 +55,7 @@ export default function CodexProbe() {
     setCode(null);
     if (!r.ok) return say(`login: ${JSON.stringify(r.failure)}`);
     await saveTokens(r.value);
+    void jobsLoggedIn();
     say(`logged in: ${r.value.email ?? '?'} (${r.value.plan ?? '?'}), token until ${new Date(r.value.expiresAt).toLocaleString()}`);
   });
 
