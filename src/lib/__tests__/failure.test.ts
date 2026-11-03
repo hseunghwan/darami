@@ -1,3 +1,5 @@
+import type { DomainName } from '../../core/types';
+import type { MemoFailure } from '../../jobs/engine';
 import { attemptsNote, failureSentence } from '../failure';
 
 describe('failureSentence', () => {
@@ -9,11 +11,11 @@ describe('failureSentence', () => {
     ['frontmatter', '페이지 정보에 꼭 필요한 항목이 빠졌어요.'],
     ['type', '이 도메인에 없는 종류의 페이지를 만들려고 했어요.'],
     ['empty', '내용이 빈 페이지를 만들었어요.'],
-    ['interrupted', '정리하는 도중 컴퓨터의 게이트웨이가 다시 시작됐어요.'],
+    ['interrupted', '앱이 닫혀서 정리가 중간에 멈췄어요. 다시 시도해요.'],
     ['unknown', '정리하지 못했어요.'],
     ['something-new', '정리하지 못했어요.'],
   ])('%s', (code, text) => {
-    expect(failureSentence({ code, detail: 'x' })).toEqual({ text, link: null });
+    expect(failureSentence({ code: code as MemoFailure['code'], detail: 'x' })).toEqual({ text, link: null });
   });
 
   it('names the missing page from the first [[...]] of a broken-link detail', () => {
@@ -27,11 +29,16 @@ describe('failureSentence', () => {
 });
 
 describe('attemptsNote', () => {
-  const f = { attempts: 1, max: 3, code: 'llm', detail: '' };
-  it('says every attempt was blocked on a failed memo', () => expect(attemptsNote('failed', { ...f, attempts: 3 })).toBe('3번 모두 막혔어요'));
+  const domain = '스터디' as DomainName;
+  const f: MemoFailure = { attempts: 1, max: 3, code: 'llm', detail: '' };
+  it('says every attempt was blocked on a failed memo', () =>
+    expect(attemptsNote({ state: 'failed', domain, failure: { ...f, attempts: 3 }, finished: { day: '2026-10-29' } })).toBe('3번 모두 막혔어요'));
   it('counts the attempt in progress on a retrying memo', () => {
-    expect(attemptsNote('routed', f)).toBe('2번째 시도 중');
-    expect(attemptsNote('running', { ...f, attempts: 2 })).toBe('3번째 시도 중');
+    expect(attemptsNote({ state: 'routed', domain, retry: f })).toBe('2번째 시도 중');
+    expect(attemptsNote({ state: 'running', domain, retry: { ...f, attempts: 2 } })).toBe('3번째 시도 중');
   });
-  it('says nothing right after a retry, when failure is null', () => expect(attemptsNote('routed', null)).toBeNull());
+  it('says nothing right after a retry, and nothing on a memo that never failed', () => {
+    expect(attemptsNote({ state: 'routed', domain, retry: null })).toBeNull();
+    expect(attemptsNote({ state: 'held', domain })).toBeNull();
+  });
 });

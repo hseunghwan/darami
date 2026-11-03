@@ -1,6 +1,5 @@
 import { COPY, localeFor, type Copy } from '..';
 import { verdictText } from '../../lib/memos';
-import type { MemoListItemWire } from '../../lib/wire';
 
 const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
 const DAY = new Date('2026-10-29T14:40:00+09:00');
@@ -40,6 +39,7 @@ const ARGS: Record<string, unknown[][]> = {
   'photos.count': [[1], [3]],
   'photos.attachN': [[2]],
   'activity.counts': [[1, 2]],
+  'activity.reading': [[1], [3]],
   'activity.heldFallback': [['learning']],
   'activity.heldGuess': [['learning', 'Sounds like study notes'], ['learning', '']],
   'detail.filedTo': [['learning']],
@@ -140,33 +140,13 @@ describe('tables', () => {
 });
 
 describe('verdict', () => {
-  type V = Pick<MemoListItemWire, 'verdict' | 'verdict_id'>;
-  const fromEnglishWiki: V = { verdict: 'new page', verdict_id: 'created' };
-  const fromKoreanWiki: V = { verdict: '기존 페이지 수정', verdict_id: 'updated' };
-  const beforeTheGateway: V = { verdict: '기존 내용과 충돌', verdict_id: null };
-  const olderGateway: V = { verdict: '새 페이지' };
-  const newerId = { verdict: 'merged', verdict_id: 'merged' } as unknown as V;
-
-  it('words verdict_id in the phone language, whatever language the wiki writes', () => {
-    expect(verdictText(fromEnglishWiki)).toBe('새 페이지');
-    expect(loadAs('en-US').memos.verdictText(fromKoreanWiki)).toBe('Updated page');
-    expect(loadAs('en-US').memos.verdictText({ verdict: '저장', verdict_id: 'saved' })).toBe('Saved');
+  it('words the engine\'s verdict in the phone language, whatever language the wiki writes', () => {
+    expect(verdictText('created')).toBe('새 페이지');
+    expect(loadAs('en-US').memos.verdictText('updated')).toBe('Updated page');
+    expect(loadAs('en-US').memos.verdictText('saved')).toBe('Saved');
   });
 
-  it('shows the wire text when verdict_id is null, absent, or unknown', () => {
-    for (const memos of [loadAs('ko-KR').memos, loadAs('en-US').memos]) {
-      expect(memos.verdictText(beforeTheGateway)).toBe('기존 내용과 충돌');
-      expect(memos.verdictText(olderGateway)).toBe('새 페이지');
-      expect(memos.verdictText(newerId)).toBe('merged');
-      expect(memos.verdictText({ verdict: null, verdict_id: null })).toBeNull();
-    }
-  });
-
-  it('reaches the recent memo rows', () => {
-    const item: MemoListItemWire = {
-      id: 'a', text: 'x', captured_at: '2026-10-29T15:00:00+09:00', tz: 'Asia/Seoul', source: 'typed', domain: 'learning', state: 'ingested',
-      verdict: '새 페이지', verdict_id: 'created', first_page: 'RAG', finished_at: '2026-10-29T15:02:00+09:00', photos: 0,
-    };
-    expect(loadAs('en-US').memos.mergeRecent([], [item])[0]!.verdict).toBe('New page');
+  it('shows a verdict the engine never wrote as the ledger has it', () => {
+    for (const memos of [loadAs('ko-KR').memos, loadAs('en-US').memos]) expect(memos.verdictText({ unknown: '기존 내용과 충돌' })).toBe('기존 내용과 충돌');
   });
 });
