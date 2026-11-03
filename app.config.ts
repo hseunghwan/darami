@@ -37,7 +37,6 @@ const config: ExpoConfig = {
     ['expo-build-properties', { android: { usesCleartextTraffic: true } }],
     './plugins/with-release-signing',
     'expo-sqlite',
-    ['expo-camera', { recordAudioAndroid: false, microphonePermission: false, barcodeScannerEnabled: true }],
     'expo-location',
     ['expo-media-library', { savePhotosPermission: false, isAccessMediaLocationEnabled: true, granularPermissions: ['photo'] }],
     ['expo-image-picker', { photosPermission: false, microphonePermission: false }],
