@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 // Picked and shared photos wait in files/outbox/pending/, a path plugins/with-capture-intents.js
-// hardcodes for CaptureActivity. Nothing files them until P6.
+// hardcodes for CaptureActivity, until accept has stored them in the wiki folder.
 
 export const pendingDir = () => new Directory(Paths.document, 'outbox', 'pending');
 
@@ -30,13 +30,18 @@ export function removeQuietly(uris: readonly string[]): void {
   }
 }
 
-/** Picks from a compose sheet that was closed without saving. Older than a day, so a sheet still open is safe. */
-export function sweepPending(now = Date.now()): void {
+/**
+ * Photos a share sheet left when it was killed. Older than a day, so a sheet still open is safe, and
+ * never one the memo tab's kept draft names (`keep`, by file name), which waits for its send.
+ */
+export function sweepPending(keep: ReadonlySet<string>, now = Date.now()): void {
   try {
     const dir = pendingDir();
     if (!dir.exists) return;
     for (const f of dir.list()) {
-      if (f instanceof File && (f.modificationTime ?? now) < now - 24 * 3_600_000) f.delete();
+      if (f instanceof File && !keep.has(f.name) && (f.modificationTime ?? now) < now - 24 * 3_600_000) f.delete();
     }
   } catch {}
 }
+
+export const fileName = (uri: string): string => uri.slice(uri.lastIndexOf('/') + 1);

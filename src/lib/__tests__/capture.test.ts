@@ -29,6 +29,10 @@ it('builds the memo request with the phone offset and time zone', () => {
     source: 'typed',
     domainHint: '스터디',
     location: { lat: 37.54, lon: 127.05, place: '성동구 성수동2가', address: '서울특별시 성동구 성수동2가 273-5' },
+    photos: [
+      { uri: 'file:///files/outbox/pending/a.jpg', origin: 'gallery', place: '사직동', address: null },
+      { uri: 'file:///files/outbox/pending/b.heic', origin: 'camera', place: null, address: null },
+    ],
   });
   expect(req).toEqual({
     id: '0d4e8c3a-1b2c-4d5e-8f90-123456789abc',
@@ -38,5 +42,9 @@ it('builds the memo request with the phone offset and time zone', () => {
     location: { lat: 37.54, lon: 127.05, place: '성동구 성수동2가', address: '서울특별시 성동구 성수동2가 273-5' },
     source: 'typed',
     domain_hint: '스터디',
+    attachments: [
+      { n: 1, origin: 'gallery', place: '사직동', address: null },
+      { n: 2, origin: 'camera', place: null, address: null },
+    ],
   });
 });

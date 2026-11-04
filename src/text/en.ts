@@ -164,6 +164,9 @@ export const en: Copy = {
     noWiki: 'There is no wiki folder to save into. Pick one in Settings.',
     invalid: (detail) => `This memo can't be saved: ${detail}`,
     notSaved: "Couldn't save it to the wiki folder. The text is still here; try again.",
+    photoMissing: (n) => `Photo ${n} is gone, so it was taken off. Send again.`,
+    photoUnsupported: (n) => `Photo ${n} can't be read on this phone, so it was taken off. Send again.`,
+    photoConflict: "Couldn't save the photos. Send again.",
   },
   memoTab: {
     input: 'Memo text',
@@ -254,8 +257,6 @@ export const en: Copy = {
     note: 'Add a line (optional)',
     noteLabel: 'Add a line',
     notePlaceholder: 'Say why you are saving it for a better summary',
-    photosLater: 'Photos come in a later version. Only the text is saved.',
-    onlyPhotos: "Photos come in a later version, so there's nothing to save yet.",
   },
   settings: {
     theme: { system: 'System', dark: 'Dark', light: 'Light' },

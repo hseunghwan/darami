@@ -46,7 +46,7 @@ async function gaveUpMemo() {
 test('the book lists held memos with their routing, and confirm moves one into raw/ byte for byte', async () => {
   const w = await heldMemo();
   await w.engine.book.refresh();
-  assert.deepEqual(w.engine.book.current().held, [{ id: ID, capturedAt: '2026-10-29T08:01:00+09:00', preview: '애매한 메모', source: 'typed', at: { state: 'held', domain: 스터디 }, routing: { by: 'classifier', confidence: 0.4, reason: '애매함' } }]);
+  assert.deepEqual(w.engine.book.current().held, [{ id: ID, capturedAt: '2026-10-29T08:01:00+09:00', preview: '애매한 메모', source: 'typed', photos: 0, at: { state: 'held', domain: 스터디 }, routing: { by: 'classifier', confidence: 0.4, reason: '애매함' } }]);
   const holdText = read(w.root, `스터디/hold/${ID}.md`);
   assert.deepEqual(await w.engine.confirm(ID), { kind: 'released', domain: 스터디 });
   assert.equal(read(w.root, `스터디/raw/${ID}.md`), holdText);

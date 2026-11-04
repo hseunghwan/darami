@@ -1,4 +1,4 @@
-import { markdownSpans, pageLabel } from '../markdown';
+import { markdownBlocks, markdownSpans, pageLabel } from '../markdown';
 
 const render = (text: string) => markdownSpans(text).map((s) => (s.kind === 'text' ? s.text : `<${s.kind}>${s.text}</${s.kind}>`)).join('');
 
@@ -29,4 +29,15 @@ it('leaves unmatched markers as typed, so a half-streamed answer still reads', (
 it('labels cited pages without the domain prefix', () => {
   expect(pageLabel('스터디/wiki/개념/RAG')).toBe('개념/RAG');
   expect(pageLabel('인사이트/2026')).toBe('인사이트/2026');
+});
+
+it('lays a page out as text blocks around pictures, a picture being an embed alone on its line', () => {
+  const blocks = markdownBlocks('친구랑 놀이터에 갔다.\n사진에서 본 그네.\n\n![[A-1.jpg]]\n![[A-2.jpg|300]]\n\n보기: ![[A-3.jpg]] 끝\n![[노트]]');
+  expect(blocks.map((b) => (b.kind === 'photo' ? `photo ${b.file}` : `text ${b.spans.map((s) => (s.kind === 'text' ? s.text : `<${s.kind}>${s.text}`)).join('')}`))).toEqual([
+    'text 친구랑 놀이터에 갔다.\n사진에서 본 그네.',
+    'photo A-1.jpg',
+    'photo A-2.jpg',
+    'text 보기: <embed>A-3.jpg 끝\n<embed>노트',
+  ]);
+  expect(markdownBlocks('')).toEqual([]);
 });

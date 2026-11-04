@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import * as Network from 'expo-network';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
@@ -7,17 +8,20 @@ import { FolderUnreachable } from './core/fs';
 import { parseMemo, type PageRef } from './core/pages';
 import type { ChatTarget, DomainName, MemoId } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
+import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
 import { MODEL_PROFILES } from './agent/model';
 import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
 import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
-import { parseSafTree, type SafTree } from './fs/saf-uri';
+import { documentUri, parseSafTree, type SafTree } from './fs/saf-uri';
 import { buildMemoRequest, type GeoFix } from './lib/capture';
 import { chatLogLine, type Asked, type Saved } from './lib/chats';
 import { kv } from './lib/db';
-import { sweepPending } from './lib/files';
+import { fileName, removeQuietly, sweepPending } from './lib/files';
+import { DRAFT_KEY, parseSavedDraft } from './lib/draft';
+import type { DraftPhoto } from './lib/photos';
 import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
@@ -228,6 +232,8 @@ export type Capture = {
   readonly source: 'typed' | 'share' | 'selection' | 'chat';
   readonly domainHint: string | null;
   readonly location: GeoFix | null;
+  /** Photo n is photos[n - 1], each a file the app holds until the memo is filed. */
+  readonly photos?: readonly DraftPhoto[];
 };
 
 export type Filed =
@@ -241,15 +247,27 @@ export type Filed =
   /** Nothing was written: photo n is gone, unreadable on this phone, or other bytes than an earlier send of this draft. */
   | PhotoRefusal;
 
-/** Resolves only after accept answers, so the caller clears its draft on `filed` and on nothing else. */
+/** A pending photo's bytes, or null once the file is gone. */
+async function readPending(uri: string): Promise<Uint8Array | null> {
+  const f = new File(uri);
+  return f.exists ? f.bytes() : null;
+}
+
+/**
+ * Resolves only after accept answers, so the caller clears its draft on `filed` and on nothing
+ * else. The photos' files are deleted once the memo is filed, since the folder then holds every
+ * byte; on any other answer they stay for the next send.
+ */
 export async function fileMemo(c: Capture): Promise<Filed> {
-  const parsed = parseMemo(buildMemoRequest({ id: c.id, text: c.text, at: new Date(), source: c.source, domainHint: c.domainHint, location: c.location }));
+  const photos = c.photos ?? [];
+  const parsed = parseMemo(buildMemoRequest({ id: c.id, text: c.text, at: new Date(), source: c.source, domainHint: c.domainHint, location: c.location, photos }));
   if (!parsed.ok) return { kind: 'invalid', detail: parsed.detail };
   try {
     const engine = await usableEngine();
     if (!engine) return { kind: 'no-wiki' };
-    const r = await engine.accept(parsed.value);
+    const r = await engine.accept(parsed.value, (n) => readPending(photos[n - 1]!.uri));
     if (r.kind === 'photo-refused') return r;
+    removeQuietly(photos.map((p) => p.uri));
     void runner.trigger();
     return { kind: 'filed' };
   } catch (e) {
@@ -388,6 +406,13 @@ export async function deleteChat(id: ChatId): Promise<boolean> {
 
 export type PageState = { readonly kind: 'loading' } | { readonly kind: 'missing' } | { readonly kind: 'shown'; readonly page: PageView };
 
+/** The document URI of a copy in the kept folder's _attachments/, for Image, or null for a name that is not a plain file name there. */
+export function attachmentUri(file: string): string | null {
+  const tree = app.folder?.tree;
+  const path = file.includes('/') ? null : parseWikiPath(`${paths.attachments}/${file}`);
+  return tree && path ? documentUri(tree, path) : null;
+}
+
 /** A wiki page for the viewer, read again whenever the memo book changes, so a commit that rewrites it shows. */
 export function usePage(ref: PageRef): PageState {
   const book = useApp((a) => a.book);
@@ -478,7 +503,8 @@ export function boot(): Promise<void> {
     ]);
     set({ ready: true, settings, folder, login: loginOf(session, false) });
     void recheckFolder();
-    sweepPending();
+    const draft = parseSavedDraft(await kv.get(DRAFT_KEY).catch(() => null));
+    sweepPending(new Set(draft?.photos.map((p) => fileName(p.uri)) ?? []));
 
     AppState.addEventListener('change', (s) => runner.setForeground(s === 'active'));
     void Network.getNetworkStateAsync().then((n) => set({ online: n.isConnected ?? null }), () => {});

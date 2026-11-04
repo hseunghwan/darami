@@ -1,4 +1,5 @@
 import { linkTarget } from '../core/pages';
+import { isImageLink } from '../core/photos';
 
 /**
  * Just enough Markdown for chat answers and wiki pages: bold, wikilinks, embeds, headings and
@@ -37,4 +38,38 @@ export function markdownSpans(text: string): Span[] {
     const spans: Span[] = heading ? [{ kind: 'bold', text: heading[1]! }] : bullet ? [{ kind: 'text', text: `${bullet[1]}• ` }, ...inline(bullet[2]!)] : inline(line);
     return i === 0 ? spans : [{ kind: 'text' as const, text: '\n' }, ...spans];
   });
+}
+
+export type Block =
+  | { readonly kind: 'text'; readonly spans: readonly Span[] }
+  /** `file` is the embed's target as linkTarget normalizes it, the name check() looked up in _attachments/. */
+  | { readonly kind: 'photo'; readonly file: string };
+
+const EMBED_LINE = /^\s*!\[\[([^\]]+)\]\]\s*$/;
+
+/**
+ * A page for the viewer: an embed alone on its line is a picture, and the lines between pictures
+ * are one text block each, so a selection still spans a paragraph. An embed inside a sentence
+ * stays the span it is in chat.
+ */
+export function markdownBlocks(text: string): Block[] {
+  const out: Block[] = [];
+  let lines: string[] = [];
+  const flush = () => {
+    const body = lines.join('\n').replace(/^\n+|\n+$/g, '');
+    if (body !== '') out.push({ kind: 'text', spans: markdownSpans(body) });
+    lines = [];
+  };
+  for (const line of text.split('\n')) {
+    const m = EMBED_LINE.exec(line);
+    const file = m ? linkTarget(m[1]!) : '';
+    if (!file || !isImageLink(file)) {
+      lines.push(line);
+      continue;
+    }
+    flush();
+    out.push({ kind: 'photo', file });
+  }
+  flush();
+  return out;
 }

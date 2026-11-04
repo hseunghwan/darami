@@ -38,6 +38,7 @@ export type MemoRow = {
   /** The first PREVIEW_CHARS characters of the text as captured. The detail reads the whole text. */
   readonly preview: string;
   readonly source: MemoSource;
+  readonly photos: number;
   /** An ingested memo's `finished` is `{ at }` where darami recorded the commit, `{ day }` from the ledger otherwise. */
   readonly at: Placement;
 };
@@ -474,7 +475,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
       const row: MemoRow =
         was && was.key === key && was.header === header
           ? was.row
-          : { id, capturedAt: header.capturedAt, preview: header.preview, source: header.source, at, ...(routing === undefined ? {} : { routing }) };
+          : { id, capturedAt: header.capturedAt, preview: header.preview, source: header.source, photos: header.photos, at, ...(routing === undefined ? {} : { routing }) };
       next.set(id, { key, header, row });
       rows.push(row);
     }
