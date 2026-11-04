@@ -54,7 +54,7 @@ test('listModels sends the login headers and reads the list, and answers a refus
   const r = await listModels(answer(200, JSON.stringify(CODEX_SHAPE)), creds);
   assert.ok(r.ok);
   assert.deepEqual(r.models.map((m) => m.slug), ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-astra']);
-  assert.equal(seen[0]!.url, 'https://chatgpt.com/backend-api/codex/models');
+  assert.equal(seen[0]!.url, 'https://chatgpt.com/backend-api/codex/models?client_version=0.165.0', 'the endpoint answers 422 without client_version');
   assert.equal(seen[0]!.headers.authorization, 'Bearer tok');
   assert.equal(seen[0]!.headers['chatgpt-account-id'], 'acct');
   assert.equal(seen[0]!.headers.originator, 'darami');
