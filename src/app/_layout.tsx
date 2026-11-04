@@ -32,6 +32,7 @@ export default function RootLayout() {
         <Stack.Screen name="chats" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="page" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="move/[id]" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
+        <Stack.Screen name="model/[role]" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
         <Stack.Screen name="compose" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
       </Stack>
     </SafeAreaProvider>
