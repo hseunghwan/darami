@@ -10,6 +10,8 @@ export type Script = {
   readonly classify?: (req: ModelRequest, n: number) => Reply;
   /** n counts the turns of this attempt from 1: an attempt starts with the prompt alone. */
   readonly ingest?: (req: ModelRequest, n: number) => Reply;
+  /** n counts the turns of this question from 1: a question starts with no function call in its input. */
+  readonly chat?: (req: ModelRequest, n: number) => Reply;
 };
 
 export type FakeModel = Model & { readonly requests: ModelRequest[] };
@@ -18,11 +20,17 @@ export function fakeModel(script: Script): FakeModel {
   const requests: ModelRequest[] = [];
   let classified = 0;
   let turn = 0;
+  let chatTurn = 0;
   const model: Model = async (req) => {
     requests.push(req);
     if (req.role === 'classify') {
       if (!script.classify) throw new Error('the script has no classify turn');
       return script.classify(req, ++classified);
+    }
+    if (req.role === 'chat') {
+      if (!script.chat) throw new Error('the script has no chat turn');
+      chatTurn = req.input.some((i) => i.type === 'function_call') ? chatTurn + 1 : 1;
+      return script.chat(req, chatTurn);
     }
     if (!script.ingest) throw new Error('the script has no ingest turn');
     turn = req.input.length === 1 ? 1 : turn + 1;
@@ -48,6 +56,12 @@ export const turn = {
   finish: (verdict: string) => call('finish', { verdict }),
   /** A turn with no tool call. */
   say: (text: string, extra: readonly OutputItem[] = []): ModelTurn => ({ ok: true, output: [{ type: 'message', text }, ...extra], text }),
+  /** A turn that streams `chunks` through onText, then ends with their text and `calls`' function calls. */
+  stream: (chunks: readonly string[], ...calls: readonly ModelTurn[]) => (req: ModelRequest): ModelTurn => {
+    for (const c of chunks) req.onText?.(c);
+    const text = chunks.join('');
+    return { ok: true, output: [...(text ? [{ type: 'message' as const, text }] : []), ...calls.flatMap((c) => (c.ok ? c.output : []))], text };
+  },
   /** The classifier's strict-schema answer. */
   route: (domain: string, confidence: number, reason: string): ModelTurn => {
     const text = JSON.stringify({ domain, confidence, reason });
@@ -58,9 +72,9 @@ export const turn = {
   cancelled: (): ModelTurn => ({ ok: false, problem: { kind: 'cancelled' } }),
 };
 
-/** Plays the turns in order, one per turn of an attempt; a function runs when its turn comes. Running out fails the test. */
-export const plays = (...turns: readonly (Reply | (() => Reply))[]) => (_req: ModelRequest, n: number): Reply => {
+/** Plays the turns in order, one per turn of an attempt; a function runs, with the request, when its turn comes. Running out fails the test. */
+export const plays = (...turns: readonly (Reply | ((req: ModelRequest) => Reply))[]) => (req: ModelRequest, n: number): Reply => {
   const t = turns[n - 1];
   if (!t) throw new Error(`the script has no turn ${n}`);
-  return typeof t === 'function' ? t() : t;
+  return typeof t === 'function' ? t(req) : t;
 };

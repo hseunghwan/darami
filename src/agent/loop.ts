@@ -1,6 +1,9 @@
 /**
- * The tool loop that replaces `claude -p` and `codex exec`: turns on the Codex endpoint until the
- * model calls `finish`, a limit is hit, or a write is refused.
+ * The tool loops that replace `claude -p` and `codex exec`: ingest's runAgent, turns on the Codex
+ * endpoint until the model calls `finish`, a limit is hit, or a write is refused; and chat's
+ * runChat, turns until one ends with no tool call, whose message is the answer. They are two loops
+ * because they differ in every rule a mode flag would branch on (tools, the stop rule, streaming),
+ * and they share replay and the read tools' dispatch, which stay private to this file.
  *
  * The loop never sees the Fs port, a WikiPath, or the journal. It gets a Workspace, whose
  * implementation (jobs/workspace.ts) holds every rule about what a job may read and write.
@@ -18,6 +21,13 @@ export type Shown = { readonly kind: 'shown'; readonly text: string };
 /** A write outside the job's write scope. Nothing was written, and the attempt fails with `scope`. `path` is as check() reports it. */
 export type Refused = { readonly kind: 'refused'; readonly path: string };
 
+/** The tools that only look. A chat gets a Reader, so nothing it holds can change a file. */
+export type Reader = {
+  read(path: string): Promise<Shown>;
+  list(path: string): Promise<Shown>;
+  search(query: string): Promise<Shown>;
+};
+
 /**
  * The job's folder as its model may use it, paths written relative to the domain folder.
  * - read, list, and search reach only the read scope; elsewhere answers as a missing file does.
@@ -27,10 +37,7 @@ export type Refused = { readonly kind: 'refused'; readonly path: string };
  * - index.md and log.md answer an error and the run goes on; _review.md takes only text added at its end.
  * - any other write is Refused.
  */
-export type Workspace = {
-  read(path: string): Promise<Shown>;
-  list(path: string): Promise<Shown>;
-  search(query: string): Promise<Shown>;
+export type Workspace = Reader & {
   write(path: string, text: string): Promise<Shown | Refused>;
   edit(path: string, old: string, next: string): Promise<Shown | Refused>;
 };
@@ -161,23 +168,119 @@ function verdictOf(json: string): IngestVerdict | null {
 }
 
 /** Arguments that are not JSON or lack a field answer an error to the model; they never fail the attempt. */
-async function dispatch(ws: Workspace, call: FunctionCall): Promise<Shown | Refused> {
+function withArgs<T>(call: FunctionCall, names: readonly string[], fn: (...v: string[]) => Promise<T>): Promise<T | Shown> {
   const args = argsOf(call.arguments);
-  if (!args) return shown('error: the arguments are not a JSON object');
-  const fields = (...names: string[]): string[] | Shown => {
-    const missing = names.filter((n) => typeof args[n] !== 'string');
-    return missing.length ? shown(`error: ${call.name} needs ${missing.join(', ')} as text`) : names.map((n) => args[n] as string);
-  };
-  const run = (names: string[], fn: (...v: string[]) => Promise<Shown | Refused>) => {
-    const v = fields(...names);
-    return Array.isArray(v) ? fn(...v) : Promise.resolve(v);
-  };
+  if (!args) return Promise.resolve(shown('error: the arguments are not a JSON object'));
+  const missing = names.filter((n) => typeof args[n] !== 'string');
+  return missing.length ? Promise.resolve(shown(`error: ${call.name} needs ${missing.join(', ')} as text`)) : fn(...names.map((n) => args[n] as string));
+}
+
+/** list, read, and search, which both loops offer; null for any other name. */
+function dispatchRead(r: Reader, call: FunctionCall): Promise<Shown> | null {
   switch (call.name) {
-    case 'list': return run(['path'], (p) => ws.list(p!));
-    case 'read': return run(['path'], (p) => ws.read(p!));
-    case 'search': return run(['query'], (q) => ws.search(q!));
-    case 'write': return run(['path', 'text'], (p, t) => ws.write(p!, t!));
-    case 'edit': return run(['path', 'old', 'new'], (p, o, n) => ws.edit(p!, o!, n!));
-    default: return shown(`error: no tool named ${call.name}`);
+    case 'list': return withArgs(call, ['path'], (p) => r.list(p!));
+    case 'read': return withArgs(call, ['path'], (p) => r.read(p!));
+    case 'search': return withArgs(call, ['query'], (q) => r.search(q!));
+    default: return null;
+  }
+}
+
+function dispatch(ws: Workspace, call: FunctionCall): Promise<Shown | Refused> {
+  const looked = dispatchRead(ws, call);
+  if (looked) return looked;
+  switch (call.name) {
+    case 'write': return withArgs(call, ['path', 'text'], (p, t) => ws.write(p!, t!));
+    case 'edit': return withArgs(call, ['path', 'old', 'new'], (p, o, n) => ws.edit(p!, o!, n!));
+    default: return Promise.resolve(shown(`error: no tool named ${call.name}`));
+  }
+}
+
+/** A chat's tools, paths from the wiki folder. loop.test pins the names, so a tool that writes fails a test. */
+export const CHAT_TOOLS: readonly FunctionTool[] = [
+  tool('list', 'List every file under a folder of the wiki, at any depth. Paths start at the wiki folder.', {
+    path: str('A folder such as `스터디/wiki` or `_schema`.'),
+  }),
+  tool('read', 'Read a whole text file.', {
+    path: str('A file such as `스터디/wiki/index.md`, `스터디/wiki/RAG.md`, or `CLAUDE.md`.'),
+  }),
+  tool('search', "Find wiki pages whose path, summary, or text holds every word of the query, ignoring case. Looks at the pages each wiki/index.md lists, best matches first. Answers each page's path and its first matching lines.", {
+    query: str('One or more words.'),
+  }),
+];
+
+export type ChatLimits = {
+  /** Model turns with tools per question. After them, one more turn goes out with no tools. */
+  readonly turns: number;
+  /** Wall time per question before that last turn. */
+  readonly askMs: number;
+};
+
+export const CHAT_LIMITS: ChatLimits = { turns: 10, askMs: 3 * 60_000 };
+
+/**
+ * What the screen shows while a question runs. Each event replaces the last, so the screen only
+ * sets state. `text` is the whole text of the current turn so far. When that turn ends with a tool
+ * call, its text was a preamble ("let me look"), and `reading` follows, naming every page read so far.
+ */
+export type ChatProgress = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'reading'; readonly paths: readonly string[] };
+
+export type ChatRequest = {
+  readonly instructions: string;
+  /** Earlier answered turns, oldest first, as text only. */
+  readonly history: readonly { readonly question: string; readonly answer: string }[];
+  readonly question: string;
+  /** The developer message of the last turn, the one with no tools. */
+  readonly wrapUp: string;
+  readonly reader: Reader;
+  readonly limits: ChatLimits;
+  readonly signal: AbortSignal;
+  readonly now: () => number;
+  readonly onProgress: (p: ChatProgress) => void;
+};
+
+/** How a question ran: model turns, and each tool call's name in order. */
+export type ChatTrace = { readonly turns: number; readonly tools: readonly string[] };
+
+export type ChatResult =
+  /** `text` is the final turn's message as the endpoint finished it, not the joined deltas. `wrapped`: it came from the turn after the limits. */
+  | { readonly kind: 'answered'; readonly text: string; readonly wrapped: boolean; readonly trace: ChatTrace }
+  | { readonly kind: 'failed'; readonly reason: 'turns' | 'time' | 'empty' | 'rejected'; readonly detail: string; readonly trace: ChatTrace }
+  | Unavailable
+  | { readonly kind: 'cancelled' };
+
+const developer = (text: string): InputItem => ({ type: 'message', role: 'developer', content: [{ type: 'input_text', text }] });
+const assistant = (text: string): InputItem => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+
+export async function runChat(model: Model, req: ChatRequest): Promise<ChatResult> {
+  const input: InputItem[] = [...req.history.flatMap((qa) => [user(qa.question), assistant(qa.answer)]), user(req.question)];
+  const start = req.now();
+  const tools: string[] = [];
+  const read: string[] = [];
+  for (let turn = 1; ; turn++) {
+    const spent = turn > req.limits.turns ? 'turns' : req.now() - start > req.limits.askMs ? 'time' : null;
+    if (spent) input.push(developer(req.wrapUp));
+    let text = '';
+    const r = await model(
+      {
+        role: 'chat', profile: null, instructions: req.instructions, input: [...input], tools: spent ? [] : CHAT_TOOLS,
+        onText: (delta) => req.onProgress({ kind: 'text', text: (text += delta) }),
+      },
+      req.signal,
+    );
+    const trace = { turns: turn, tools: [...tools] };
+    if (!r.ok) return r.problem.kind === 'rejected' ? { kind: 'failed', reason: 'rejected', detail: r.problem.detail, trace } : r.problem;
+    const calls = r.output.filter((o): o is FunctionCall => o.type === 'function_call');
+    if (calls.length === 0) {
+      return r.text.trim() ? { kind: 'answered', text: r.text, wrapped: spent !== null, trace } : { kind: 'failed', reason: spent ?? 'empty', detail: 'the model gave no answer', trace };
+    }
+    if (spent) return { kind: 'failed', reason: spent, detail: 'the model called a tool on its last turn', trace };
+    input.push(...replay(r.output));
+    for (const call of calls) {
+      tools.push(call.name);
+      const path = call.name === 'read' ? argsOf(call.arguments)?.path : undefined;
+      if (typeof path === 'string' && !read.includes(path)) read.push(path);
+      input.push(answer(call, ((await dispatchRead(req.reader, call)) ?? shown(`error: no tool named ${call.name}`)).text));
+    }
+    req.onProgress({ kind: 'reading', paths: [...read] });
   }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { InputItem } from '../../codex/responses';
-import { LIMITS, runAgent, TOOLS, type AgentRequest, type Refused, type Shown, type Workspace } from '../loop';
+import { CHAT_LIMITS, CHAT_TOOLS, LIMITS, runAgent, runChat, TOOLS, type AgentRequest, type ChatProgress, type ChatRequest, type Reader, type Refused, type Shown, type Workspace } from '../loop';
 import { fakeModel, plays, turn } from './fake-model';
 
 /** A workspace that answers each call with its name and arguments, and refuses one path. */
@@ -106,6 +106,117 @@ test('every tool schema is strict: all properties required, none extra', () => {
     const p = t.parameters as { required: string[]; properties: Record<string, unknown>; additionalProperties: boolean };
     assert.equal(t.strict, true, t.name);
     assert.equal(p.additionalProperties, false, t.name);
+    assert.deepEqual(p.required, Object.keys(p.properties), t.name);
+  }
+});
+
+/** A reader that answers each look with its name and argument. */
+function echoReader(): Reader & { calls: string[] } {
+  const calls: string[] = [];
+  const shown = (text: string): Shown => ({ kind: 'shown', text });
+  return {
+    calls,
+    read: async (p) => (calls.push(`read ${p}`), shown(`text of ${p}`)),
+    list: async (p) => (calls.push(`list ${p}`), shown(`files of ${p}`)),
+    search: async (q) => (calls.push(`search ${q}`), shown(`hits of ${q}`)),
+  };
+}
+
+function ask(reader: Reader, over: Partial<ChatRequest> = {}): ChatRequest & { progress: ChatProgress[] } {
+  const progress: ChatProgress[] = [];
+  return {
+    instructions: 'chat rules', history: [], question: 'RAG?', wrapUp: 'answer now', reader, limits: CHAT_LIMITS,
+    signal: new AbortController().signal, now: () => 0, onProgress: (p) => progress.push(p), progress, ...over,
+  };
+}
+
+const user = (text: string) => ({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+const assistant = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+
+test('a chat streams each turn, drops a preamble once its turn calls a tool, and answers with the final message', async () => {
+  const reader = echoReader();
+  const index = turn.read('스터디/wiki/index.md');
+  const model = fakeModel({
+    chat: plays(turn.stream(['Let me ', 'look.'], index), (req) => {
+      req.onText?.('RAG is ');
+      req.onText?.('[[스터디/wiki/RAG]]');
+      return { ok: true, output: [{ type: 'message', text: 'RAG is [[스터디/wiki/RAG]].' }], text: 'RAG is [[스터디/wiki/RAG]].' };
+    }),
+  });
+  const req = ask(reader);
+  const r = await runChat(model, req);
+  assert.deepEqual(r, { kind: 'answered', text: 'RAG is [[스터디/wiki/RAG]].', wrapped: false, trace: { turns: 2, tools: ['read'] } });
+  assert.deepEqual(req.progress, [
+    { kind: 'text', text: 'Let me ' },
+    { kind: 'text', text: 'Let me look.' },
+    { kind: 'reading', paths: ['스터디/wiki/index.md'] },
+    { kind: 'text', text: 'RAG is ' },
+    { kind: 'text', text: 'RAG is [[스터디/wiki/RAG]]' },
+  ]);
+  assert.deepEqual(reader.calls, ['read 스터디/wiki/index.md']);
+  assert.ok(index.ok);
+  assert.deepEqual(model.requests[1]!.input, [
+    user('RAG?'),
+    assistant('Let me look.'),
+    index.output[0],
+    { type: 'function_call_output', call_id: (index.output[0] as { call_id: string }).call_id, output: 'text of 스터디/wiki/index.md' },
+  ]);
+  for (const q of model.requests) {
+    assert.equal(q.role, 'chat');
+    assert.deepEqual(q.tools, CHAT_TOOLS);
+    assert.equal(q.instructions, 'chat rules');
+  }
+});
+
+test('earlier turns go out as question and answer text, before the question', async () => {
+  const model = fakeModel({ chat: plays(turn.say('three')) });
+  await runChat(model, ask(echoReader(), { history: [{ question: 'one?', answer: 'one' }, { question: 'two?', answer: 'two' }], question: 'three?' }));
+  assert.deepEqual(model.requests[0]!.input, [user('one?'), assistant('one'), user('two?'), assistant('two'), user('three?')]);
+});
+
+test('a chat has no tool that writes: write, edit, finish, and unknown names answer errors and reach nothing', async () => {
+  const reader = echoReader();
+  const model = fakeModel({
+    chat: plays(turn.write('스터디/wiki/x.md', 'x'), turn.edit('스터디/wiki/x.md', 'a', 'b'), turn.finish('created'), turn.call('rm', { path: 'x' }), turn.say('done')),
+  });
+  assert.equal((await runChat(model, ask(reader))).kind, 'answered');
+  assert.deepEqual(reader.calls, []);
+  assert.deepEqual(outputs(model.requests.at(-1)!.input), ['error: no tool named write', 'error: no tool named edit', 'error: no tool named finish', 'error: no tool named rm']);
+});
+
+test('past the turn or time limit, one more turn goes out with no tools, and its answer is kept as wrapped', async () => {
+  const forever = fakeModel({ chat: (_req, n) => (n <= 3 ? turn.read(`p${n}.md`) : turn.say('what I have')) });
+  const r = await runChat(forever, ask(echoReader(), { limits: { ...CHAT_LIMITS, turns: 3 } }));
+  assert.deepEqual(r, { kind: 'answered', text: 'what I have', wrapped: true, trace: { turns: 4, tools: ['read', 'read', 'read'] } });
+  const last = forever.requests.at(-1)!;
+  assert.deepEqual(last.tools, []);
+  assert.deepEqual(last.input.at(-1), { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'answer now' }] });
+  assert.deepEqual(forever.requests.slice(0, 3).map((q) => q.tools), [CHAT_TOOLS, CHAT_TOOLS, CHAT_TOOLS]);
+
+  const stubborn = fakeModel({ chat: () => turn.read('again.md') });
+  const s = await runChat(stubborn, ask(echoReader(), { limits: { ...CHAT_LIMITS, turns: 2 } }));
+  assert.equal(s.kind === 'failed' && s.reason, 'turns');
+  assert.equal(stubborn.requests.length, 3);
+
+  let clock = 0;
+  const slow = fakeModel({ chat: () => ((clock += 2 * 60_000), clock > 4 * 60_000 ? turn.say('late') : turn.search('x')) });
+  const t = await runChat(slow, ask(echoReader(), { now: () => clock }));
+  assert.equal(t.kind === 'answered' && t.wrapped, true);
+  assert.equal(slow.requests.length, 3, 'two turns until 3 minutes have passed, then the last one');
+});
+
+test('a blank answer and a refused request fail; unavailable and cancelled come back as they are', async () => {
+  assert.equal(((await runChat(fakeModel({ chat: plays(turn.say('  ')) }), ask(echoReader()))) as { reason: string }).reason, 'empty');
+  assert.deepEqual(await runChat(fakeModel({ chat: plays(turn.rejected('400 too long')) }), ask(echoReader())), { kind: 'failed', reason: 'rejected', detail: '400 too long', trace: { turns: 1, tools: [] } });
+  assert.equal((await runChat(fakeModel({ chat: plays(turn.search('x'), turn.unavailable('rate-limited')) }), ask(echoReader()))).kind, 'unavailable');
+  assert.deepEqual(await runChat(fakeModel({ chat: plays(turn.cancelled()) }), ask(echoReader())), { kind: 'cancelled' });
+});
+
+test('a chat offers list, read, and search only, each strict', () => {
+  assert.deepEqual(CHAT_TOOLS.map((t) => t.name), ['list', 'read', 'search']);
+  for (const t of CHAT_TOOLS) {
+    const p = t.parameters as { required: string[]; properties: Record<string, unknown>; additionalProperties: boolean };
+    assert.equal(t.strict, true, t.name);
     assert.deepEqual(p.required, Object.keys(p.properties), t.name);
   }
 });
