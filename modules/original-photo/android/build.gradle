@@ -13,7 +13,3 @@ android {
     versionName '0.1.0'
   }
 }
-
-dependencies {
-  api "androidx.exifinterface:exifinterface:1.4.1"
-}

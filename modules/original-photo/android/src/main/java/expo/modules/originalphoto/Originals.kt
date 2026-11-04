@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
-import androidx.exifinterface.media.ExifInterface
 import java.io.File
 
 /**
@@ -40,14 +39,6 @@ object Originals {
     write(context, uri, dest)
     return Copied(dest, false)
   }
-
-  /** The GPS fix from the file's EXIF, or null. */
-  fun latLong(file: File): Pair<Double, Double>? =
-    try {
-      ExifInterface(file).latLong?.let { Pair(it[0], it[1]) }
-    } catch (e: Exception) {
-      null
-    }
 
   private fun write(context: Context, uri: Uri, dest: File) {
     try {

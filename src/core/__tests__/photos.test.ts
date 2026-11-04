@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { parseMemoFile, renderMemoFile, type Memo } from '../pages';
-import { photoFacts, photoLocation, sniffPhoto, takenAtOf, withEmbeds, withoutEmbeds, type Attachment } from '../photos';
+import { fitWithin, jpegSize, photoFacts, photoLocation, sniffPhoto, takenAtOf, withEmbeds, withoutEmbeds, type Attachment } from '../photos';
 import { memo, ulid } from './helpers';
 
 const SEOUL = { lat: 37.5665, lon: 126.978, place: '중구 태평로1가', address: '서울특별시 중구 세종대로 110' };
@@ -71,4 +71,20 @@ test('photo facts from tags: sideways sizes swap, odd values drop to null, and a
   assert.equal(photoFacts({ latitude: 91, longitude: 10 }, 'UTC').gps, null);
   assert.deepEqual(photoFacts({ latitude: -33.8688197, longitude: 151.2092955 }, 'UTC').gps, { lat: -33.86882, lon: 151.2093 });
   assert.deepEqual(photoFacts({}, 'UTC'), { width: null, height: null, takenAt: null, device: null, camera: null, gps: null });
+});
+
+test('a copy is never enlarged, and a larger one is brought to the cap on its long edge', () => {
+  assert.equal(fitWithin(2048, 1536, 2048), null);
+  assert.equal(fitWithin(64, 32, 2048), null);
+  assert.deepEqual(fitWithin(4032, 3024, 2048), { width: 2048 });
+  assert.deepEqual(fitWithin(3024, 4032, 2048), { height: 2048 });
+  assert.deepEqual(fitWithin(3000, 3000, 1024), { width: 1024 });
+});
+
+test('jpegSize reads the SOF marker past other segments, and nothing from bytes that are not a JPEG', () => {
+  const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x40, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01];
+  const app1 = [0xff, 0xe1, 0x00, 0x06, 0x45, 0x78, 0x69, 0x66];
+  assert.deepEqual(jpegSize(Uint8Array.from([0xff, 0xd8, ...app1, ...sof, 0xff, 0xd9])), { width: 64, height: 32 });
+  assert.equal(jpegSize(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9, 0, 0, 0, 0, 0, 0, 0])), null);
+  assert.equal(jpegSize(Uint8Array.from('<html></html>', (c) => c.charCodeAt(0))), null);
 });

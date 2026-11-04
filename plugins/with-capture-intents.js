@@ -49,7 +49,7 @@ class CaptureActivity : Activity() {
   private fun copy(uri: Uri): String? =
     try {
       val c = Originals.copy(this, uri, File(filesDir, "outbox/pending"), UUID.randomUUID().toString())
-      Log.i("CaptureActivity", "copied \$uri original=\${c.original} gps=\${Originals.latLong(c.file) != null}")
+      Log.i("CaptureActivity", "copied \$uri original=\${c.original}")
       Uri.fromFile(c.file).toString()
     } catch (e: Exception) {
       Log.w("CaptureActivity", "could not copy \$uri", e)

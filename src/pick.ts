@@ -1,12 +1,14 @@
 import * as Crypto from 'expo-crypto';
+import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { Linking } from 'react-native';
-import OriginalPhoto, { type LatLong } from '../modules/original-photo';
+import OriginalPhoto from '../modules/original-photo';
 import { keepCameraShot, pendingUri } from './lib/files';
 import { geocode } from './lib/location';
-import type { PhotoOrigin } from './core/photos';
+import { photoFacts, type PhotoOrigin } from './core/photos';
 import type { DraftPhoto } from './lib/photos';
+import { readExifTags } from './media/exif';
 
 // Where photos come from. The system photo picker blanks GPS on the way out (issuetracker 243294058),
 // so the gallery is our own grid over MediaStore, read with ACCESS_MEDIA_LOCATION and setRequireOriginal.
@@ -47,22 +49,25 @@ export async function recentPhotos(after: string | null, first = 60): Promise<Ga
   return { assets: page.assets, after: page.hasNextPage ? page.endCursor : null };
 }
 
-async function draft(uri: string, origin: PhotoOrigin, latLong: LatLong | null): Promise<DraftPhoto> {
-  const where = latLong ? await geocode(latLong.lat, latLong.lon) : null;
+/** The place is named from the GPS the record will hold, read by the same rules, so the two never disagree. */
+async function draft(uri: string, origin: PhotoOrigin): Promise<DraftPhoto> {
+  const gps = await new File(uri).bytes().then((b) => readExifTags(b)).then((tags) => photoFacts(tags, 'UTC').gps, () => null);
+  const where = gps ? await geocode(gps.lat, gps.lon) : null;
   return { uri, origin, place: where?.place ?? null, address: where?.address ?? null };
+}
+
+/** One original's bytes in memory at a time. */
+async function drafts(uris: readonly string[], origin: PhotoOrigin): Promise<DraftPhoto[]> {
+  const out: DraftPhoto[] = [];
+  for (const uri of uris) out.push(await draft(uri, origin));
+  return out;
 }
 
 /** Copies each original into the app's files. One that fails to copy is skipped, not fatal. */
 export async function fromGallery(assets: readonly MediaLibrary.Asset[]): Promise<DraftPhoto[]> {
   const dir = pendingUri();
-  const copied = await Promise.all(
-    assets.map((a) =>
-      OriginalPhoto.copyAsset(a.id, dir, Crypto.randomUUID())
-        .then((c) => draft(c.uri, 'gallery', c.latLong))
-        .catch(() => null),
-    ),
-  );
-  return copied.filter((p): p is DraftPhoto => p !== null);
+  const copied = await Promise.all(assets.map((a) => OriginalPhoto.copyAsset(a.id, dir, Crypto.randomUUID()).then((c) => c.uri, () => null)));
+  return drafts(copied.filter((u): u is string => u !== null), 'gallery');
 }
 
 /** quality 1 and no editing: expo-image-picker then copies the camera's file as-is instead of re-encoding it. */
@@ -72,11 +77,8 @@ export async function fromCamera(): Promise<DraftPhoto | 'denied' | null> {
   const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false, exif: false });
   const shot = r.canceled ? null : r.assets[0];
   if (!shot) return null;
-  const uri = await keepCameraShot(shot.uri, Crypto.randomUUID());
-  return draft(uri, 'camera', await OriginalPhoto.latLong(uri).catch(() => null));
+  return draft(await keepCameraShot(shot.uri, Crypto.randomUUID()), 'camera');
 }
 
 /** CaptureActivity already copied these; only their GPS and place are left to read. */
-export async function fromShare(uris: readonly string[]): Promise<DraftPhoto[]> {
-  return Promise.all(uris.map(async (uri) => draft(uri, 'share', await OriginalPhoto.latLong(uri).catch(() => null))));
-}
+export const fromShare = (uris: readonly string[]): Promise<DraftPhoto[]> => drafts(uris, 'share');
