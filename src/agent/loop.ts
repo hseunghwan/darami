@@ -14,6 +14,7 @@
 import type { FunctionCall, FunctionTool, InputItem, OutputItem } from '../codex/responses';
 import type { ModelProfile } from '../core/config';
 import { INGEST_VERDICTS, type IngestVerdict } from '../core/ledger';
+import type { JpegDataUrl } from '../core/photos';
 import type { Model, Unavailable } from './model';
 
 /** A tool's answer as the model reads it, an error included. */
@@ -90,6 +91,8 @@ export type AgentRequest = {
   readonly profile: ModelProfile | null;
   readonly instructions: string;
   readonly prompt: string;
+  /** The memo's photos in prompt order, after the prompt on the first user message. Every turn resends that message, so each is paid for every turn. */
+  readonly images: readonly JpegDataUrl[];
   readonly nudge: string;
   readonly workspace: Workspace;
   readonly limits: AgentLimits;
@@ -105,11 +108,15 @@ export type AgentResult =
   | Unavailable
   | { readonly kind: 'cancelled' };
 
-const user = (text: string): InputItem => ({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+const user = (text: string, images: readonly JpegDataUrl[] = []): InputItem => ({
+  type: 'message',
+  role: 'user',
+  content: [{ type: 'input_text', text }, ...images.map((image_url) => ({ type: 'input_image' as const, image_url }))],
+});
 const shown = (text: string): Shown => ({ kind: 'shown', text });
 
 export async function runAgent(model: Model, req: AgentRequest): Promise<AgentResult> {
-  const input: InputItem[] = [user(req.prompt)];
+  const input: InputItem[] = [user(req.prompt, req.images)];
   const start = req.now();
   let nudges = 0;
   for (let turn = 1; turn <= req.limits.turns; turn++) {

@@ -3,7 +3,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Fs } from '../../core/fs';
 import { parseMemoFile, renderMemoFile } from '../../core/pages';
-import { COPY_JPEG, type AttachmentRequest } from '../../core/photos';
+import { COPY_JPEG, jpegDataUrl, MODEL_JPEG, type AttachmentRequest } from '../../core/photos';
 import type { MemoId } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
@@ -184,4 +184,28 @@ test('a page may embed only a copy that is in _attachments', async () => {
   const r = await run(e, '일상');
   assert.equal(r.kind, 'retrying');
   assert.match(JSON.stringify(r), new RegExp(`\\[\\[${late}-1\\.jpg\\]\\] does not resolve`));
+});
+
+test('ingest shows the model each copy at the model size after the prompt, leaves out a copy that is gone, and the classifier gets only text', async () => {
+  const tools = copyingTools();
+  const model = fakeModel({ classify: () => turn.route('일상', 0.9, '사진'), ingest: (_req, n) => (n === 1 ? turn.write('wiki/a.md', page(validFields(ID, { type: 'theme' }), '본문.\n')) : turn.finish('created')) });
+  const root = await opened();
+  const e = await engineOn(nodeFs(root), memoryJournal(), model, [], memoryBook(), undefined, { photos: tools });
+  await e.accept({ ...memo5(), domainHint: null }, held(PHOTOS));
+  await e.routeNext(NO_SIGNAL);
+  const classify = model.requests.find((r) => r.role === 'classify')!;
+  assert.doesNotMatch(JSON.stringify(classify.input), /input_image/);
+  assert.match(JSON.stringify(classify.input), /사진 1: 2026-10-12 14:03, 종로구 사직동, samsung SM-S928N/);
+
+  rmSync(join(root, copy(1)));
+  tools.specs.length = 0;
+  assert.equal((await run(e, '일상')).kind, 'committed');
+  const first = model.requests.find((r) => r.role === 'ingest')!.input[0]!;
+  assert.ok(first.type === 'message');
+  const [text, ...images] = first.content;
+  assert.deepEqual(images, [{ type: 'input_image', image_url: jpegDataUrl(PHOTOS[1]!) }], 'photo 2 only: photo 1\'s copy is gone');
+  assert.ok(text?.type === 'input_text');
+  assert.match(text.text, new RegExp(`원본에 사진 1장이 붙어 있다\\..*\\n- 사진 1: 중구 태평로1가 \\(\`!\\[\\[${ID}-2\\.jpg\\]\\]\`\\)`, 's'));
+  assert.doesNotMatch(text.text, /Read로 열어/);
+  assert.deepEqual(tools.specs, [MODEL_JPEG]);
 });

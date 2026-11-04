@@ -5,6 +5,7 @@
  *   accept   original n, then copy n, for each n in request order; the memo file last (memos.ts).
  *            Until the memo file is whole the photos belong to no memo, and the phone still holds
  *            every pending byte.
+ *   ingest   forModel: each copy that reads and decodes, made smaller for the model, never stored.
  *   check    which embeds name a copy, one look per embed instead of a listing that only grows.
  *   open     sweep: what an accept wrote for a memo that never came, 7 days on, found by its rows.
  *
@@ -18,11 +19,12 @@
 
 import { paths, parseWikiPath, type WikiPath } from '../core/layout';
 import {
-  attachmentName, attachmentOf, COPY_JPEG, isPrefixOf, ORPHAN_PHOTO_MS, originalName, PHOTO_EXTS, photoFacts, sameBytes, sniffPhoto, wholeJpeg,
-  type Attachment, type AttachmentRequest, type PhotoExt, type PhotoTools,
+  attachmentName, attachmentOf, COPY_JPEG, describePhoto, isPrefixOf, jpegDataUrl, MODEL_JPEG, ORPHAN_PHOTO_MS, originalName, PHOTO_EXTS, photoFacts, sameBytes, sniffPhoto, wholeJpeg,
+  type Attachment, type AttachmentRequest, type JpegDataUrl, type PhotoExt, type PhotoTools,
 } from '../core/photos';
 import type { Fs, ReadFs } from '../core/fs';
-import type { NewMemo } from '../core/pages';
+import type { Memo, NewMemo } from '../core/pages';
+import type { Text } from '../core/text';
 import { locate, type Places } from '../core/places';
 import type { MemoId } from '../core/types';
 import { readExifTags } from '../media/exif';
@@ -38,6 +40,9 @@ export const NO_PENDING: PendingPhotos = async () => null;
 export type PhotoRefusal = { readonly kind: 'photo-refused'; readonly n: number; readonly reason: 'missing' | 'unsupported' | 'conflict' };
 
 export type PhotoWrite = { readonly id: MemoId; readonly path: WikiPath; readonly at: string };
+
+/** A photo as the ingest model gets it: the prompt's line and embed name, and the image. */
+export type ModelPhoto = { readonly file: string; readonly line: string; readonly image: JpegDataUrl };
 
 /** Part of the BookStore: what accept is writing, so the sweep never has to list the photo folders. */
 export type PhotoWrites = {
@@ -149,6 +154,22 @@ export function photoFiles(deps: PhotoDeps) {
 
     /** The memo file is whole: its rows go, so the sweep never looks at its photos. */
     settled: (id: MemoId) => writes.dropPhotoWrites(id),
+
+    /**
+     * The copies in memo order, each made again at MODEL_JPEG for this attempt. A copy that is gone
+     * or does not decode is left out, as dotoriwiki left out a missing one, so Photo k counts the
+     * images sent.
+     */
+    async forModel(memo: Memo, t: Text): Promise<readonly ModelPhoto[]> {
+      const out: ModelPhoto[] = [];
+      for (const a of memo.attachments) {
+        const path = a.file.includes('/') ? null : parseWikiPath(`${paths.attachments}/${a.file}`);
+        const copy = path && (await fs.readBytes(path));
+        const small = copy && (await tools.jpeg(copy, MODEL_JPEG));
+        if (small) out.push({ file: a.file, line: describePhoto(a, out.length, t), image: jpegDataUrl(small) });
+      }
+      return out;
+    },
 
     /** Rows older than ORPHAN_PHOTO_MS whose memo is nowhere have their files removed; every old row then goes. No rows costs one SQLite read. */
     async sweep(): Promise<void> {

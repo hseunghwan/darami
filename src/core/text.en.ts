@@ -41,8 +41,8 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
         hasSource ? `Also read what was collected from its links, in \`raw/${id}.source.md\`.` : '',
         photos.length
           ? [
-              `The memo has ${photos.length === 1 ? 'one photo' : `${photos.length} photos`} attached. Open each file with Read and use what it shows. To put a photo on a page, write \`![[file name]]\`.`,
-              ...photos.map((p) => `- \`${p.path}\` (\`![[${p.file}]]\`) ${p.line}`),
+              `The memo has ${photos.length === 1 ? 'one photo' : `${photos.length} photos`} attached. ${photos.length === 1 ? 'The image follows' : 'The images follow'} this text in the order listed. Use what each one shows. To put a photo on a page, write \`![[file name]]\`.`,
+              ...photos.map((p) => `- ${p.line} (\`![[${p.file}]]\`)`),
             ].join('\n')
           : '',
         lastFailure ? `\nThe last attempt failed the server's checks and was rolled back. Reason: ${lastFailure}\nStart over, and avoid the same problem.` : '',

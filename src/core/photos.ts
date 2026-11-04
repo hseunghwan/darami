@@ -203,6 +203,23 @@ export function jpegSize(b: Uint8Array): { readonly width: number; readonly heig
   return null;
 }
 
+/** A JPEG as the model's input_image takes it. Minted only by jpegDataUrl, so a path or a web URL never reaches the endpoint. */
+export type JpegDataUrl = string & { readonly __brand: 'JpegDataUrl' };
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** RFC 4648 with padding. */
+export function base64(b: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < b.length; i += 3) {
+    const n = (b[i]! << 16) | ((b[i + 1] ?? 0) << 8) | (b[i + 2] ?? 0);
+    out += B64[n >> 18]! + B64[(n >> 12) & 63]! + (i + 1 < b.length ? B64[(n >> 6) & 63]! : '=') + (i + 2 < b.length ? B64[n & 63]! : '=');
+  }
+  return out;
+}
+
+export const jpegDataUrl = (jpeg: Uint8Array): JpegDataUrl => `data:image/jpeg;base64,${base64(jpeg)}` as JpegDataUrl;
+
 /** dotoriwiki's ORPHAN_PHOTO_MS: what an accept wrote for a memo that never came waits this long before it is swept. */
 export const ORPHAN_PHOTO_MS = 7 * 24 * 3_600_000;
 
