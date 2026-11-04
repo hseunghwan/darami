@@ -37,13 +37,13 @@ async function withSchemas(fs: Fs, parsed: ConfigParse): Promise<ConfigParse> {
  * recursively. A target that is missing, outside the folder, or already being inlined above
  * keeps its line as written. Throws when `path` itself is missing.
  */
-export async function composeSystemPrompt(fs: Fs, path: WikiPath): Promise<string> {
+export async function composeSystemPrompt(fs: Pick<Fs, 'readText'>, path: WikiPath): Promise<string> {
   const text = await fs.readText(path);
   if (text === null) throw new Error(`${path} does not exist`);
   return inline(fs, path, text, new Set());
 }
 
-async function inline(fs: Fs, path: WikiPath, text: string, seen: ReadonlySet<WikiPath>): Promise<string> {
+async function inline(fs: Pick<Fs, 'readText'>, path: WikiPath, text: string, seen: ReadonlySet<WikiPath>): Promise<string> {
   const dir = resolvePath(path, '..')!;
   const out: string[] = [];
   for (const line of text.split('\n')) {

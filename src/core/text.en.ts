@@ -56,12 +56,20 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
     nudge: 'If you are done, call `finish` with your verdict. If not, go on with the tools.',
   },
 
-  chatRules: (target) => `## Chat rules
+  chat: {
+    rules: (domain) => `## Chat rules
 
 - This chat only reads the wiki. Do not create or change files.
-- Read ${target === 'root' ? "each domain's `wiki/index.md`" : '`wiki/index.md`'} first, then open only the pages you need.
+- Read ${domain === null ? "each domain's `<domain>/wiki/index.md`" : c(`${domain}/wiki/index.md`)} first, then open only the pages you need.
 - Cite each wiki page your answer rests on as \`[[domain/wiki/page]]\`.
 - If the wiki does not say it, say so. Do not make it up.`,
+    workspace: (domain) => `## Workspace
+
+- You look at files only through tools: \`list\`, \`read\`, and \`search\`. None of them changes a file.
+- Paths start at the wiki folder. A page is \`<domain>/wiki/<name>.md\`, and you cite it as \`[[<domain>/wiki/<name>]]\`.${domain === null ? '' : ` This chat asks the ${c(domain)} domain, so its pages are ${c(`${domain}/wiki/<name>.md`)}.`}
+- \`search\` looks at the pages that \`wiki/index.md\` lists. When it misses, open pages by the paths in the index.`,
+    wrapUp: 'You have used up the tools for this question. Answer now from what you have read. Say that you stopped before you finished reading, and what you could not check.',
+  },
 
   index: { title: (domain) => `# ${domain} index`, note: 'The server builds this page from page frontmatter. Do not edit it.', other: 'Other', answers: 'Saved answers' },
   reviewTitle: '# To review',

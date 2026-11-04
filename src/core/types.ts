@@ -9,6 +9,9 @@ export type DomainName = string & { readonly __brand: 'DomainName' };
 export type MemoId = string & { readonly __brand: 'MemoId' };
 export type AnswerId = string & { readonly __brand: 'AnswerId' };
 
+/** What a chat asks: every domain at once, or one. dotoriwiki's ChatTarget. */
+export type ChatTarget = { readonly kind: 'root' } | { readonly kind: 'domain'; readonly domain: DomainName };
+
 export const LOCALES = ['ko', 'en'] as const;
 export type Locale = (typeof LOCALES)[number];
 

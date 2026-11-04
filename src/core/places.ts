@@ -15,8 +15,8 @@
 
 import { failureOf, type MemoFailure } from './filing';
 import type { Ledger, Verdict } from './ledger';
-import { parseMemoId } from './pages';
-import type { DomainName, MemoId } from './types';
+import { parseAnswerId, parseMemoId } from './pages';
+import type { AnswerId, DomainName, MemoId } from './types';
 
 export type MemoState = 'inbox' | 'held' | 'routed' | 'running' | 'ingested' | 'failed';
 
@@ -96,6 +96,44 @@ export function memoIdsIn(names: readonly string[]): ReadonlySet<MemoId> {
   const out = new Set<MemoId>();
   for (const name of names) {
     const id = name.endsWith('.md') ? parseMemoId(name.slice(0, -3)) : null;
+    if (id && `${id}.md` === name) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * Where a saved chat answer is, derived like a memo's placement from names and a ledger:
+ *   staged   inbox/answers/<d>/<id>.md, and <d>'s ledger has no terminal file-answer:<id>
+ *   saved    terminal `applied`: `page` is the answer page under wiki/, without `.md`
+ *   gave-up  terminal `gave-up`
+ */
+export type AnswerPlacement =
+  | { readonly state: 'staged'; readonly domain: DomainName }
+  | { readonly state: 'saved'; readonly domain: DomainName; readonly page: string }
+  | { readonly state: 'gave-up'; readonly domain: DomainName; readonly failure: MemoFailure };
+
+export type AnswerPlaces = readonly { readonly domain: DomainName; readonly staged: ReadonlySet<AnswerId>; readonly ledger: Ledger }[];
+
+/** Every answer a domain's staging folder or ledger names. A terminal line wins over a staging copy a cut-off run left. */
+export function answerPlacements(p: AnswerPlaces): ReadonlyMap<AnswerId, AnswerPlacement> {
+  const out = new Map<AnswerId, AnswerPlacement>();
+  for (const { domain, staged, ledger } of p) {
+    const filed = ledger.ids('file-answer').flatMap((s) => parseAnswerId(s) ?? []);
+    for (const id of new Set([...staged, ...filed])) {
+      const t = ledger.history('file-answer', id).terminal;
+      if (t?.kind === 'applied') out.set(id, { state: 'saved', domain, page: (t.pages[0] ?? '').replace(/\.md$/, '') });
+      else if (t?.kind === 'gave-up') out.set(id, { state: 'gave-up', domain, failure: failureOf(t, t.attempt) });
+      else if (staged.has(id)) out.set(id, { state: 'staged', domain });
+    }
+  }
+  return out;
+}
+
+/** The answer ids staged as `<id>.md` among `names`. */
+export function answerIdsIn(names: Iterable<string>): ReadonlySet<AnswerId> {
+  const out = new Set<AnswerId>();
+  for (const name of names) {
+    const id = name.endsWith('.md') ? parseAnswerId(name.slice(0, -3)) : null;
     if (id && `${id}.md` === name) out.add(id);
   }
   return out;
