@@ -17,6 +17,8 @@ The name is 다람이, Korean for a little squirrel. darami grew out of [dotoriw
 
 The file name ends in `-signed` when CI signed it with the release key, and in `-debug-signed` when no key was set up. Android refuses an update signed with a different key than the installed app. To install an APK signed with a different key, uninstall darami first. That deletes the login and the chat history on the phone. The wiki folder stays.
 
+Releases from this repository are signed with darami's release key. Its certificate's SHA-256 fingerprint is `72:1A:4C:09:BF:5F:F8:00:B8:8C:FB:BC:2E:47:64:17:7E:4B:19:80:58:15:56:50:8D:B5:99:C5:63:52:26:C3`. `apksigner verify --print-certs <apk>` prints the fingerprint of an APK you downloaded. A different fingerprint means someone else built it.
+
 ## Set it up
 
 The first run has four steps.
