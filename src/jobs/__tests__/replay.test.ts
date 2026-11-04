@@ -4,13 +4,12 @@
  * That fixture is what dotoriwiki 91f0aac wrote, so every ledger line, index.md, _review.md, memo
  * file, routing, photo record, and answer page here is held to dotoriwiki's bytes, not to darami's
  * own output. Memo 5's photos go through accept with the copying fake, as dotoriwiki's script
- * faked its shrink.
- *
- * One thing is still put in by hand: the link sidecars of memos 2 and 3 are copied in.
+ * faked its shrink, and memos 2 and 3 get their link sidecars from the engine with the script's
+ * fake fetcher, so the photo record and both sidecars are darami's own bytes.
  */
 
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderAnswerStaging, type AnswerFiling } from '../../core/pages';
 import type { AnswerId, DomainName, MemoId } from '../../core/types';
@@ -18,7 +17,7 @@ import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
 import { fakeModel, turn } from '../../agent/__tests__/fake-model';
 import type { ModelRequest } from '../../agent/model';
-import { engineOn, memoryJournal, NO_SIGNAL, presetWiki, run, snapshot } from './harness';
+import { engineOn, fixtureFetch, memoryJournal, NO_SIGNAL, presetWiki, run, snapshot } from './harness';
 
 const FIXTURE = join(__dirname, '..', '..', 'core', '__tests__', 'fixtures', 'made-by-dotoriwiki');
 const 스터디 = '스터디' as DomainName;
@@ -51,7 +50,8 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
     },
   });
   const fs = nodeFs(root);
-  const engine = await engineOn(fs, memoryJournal(), model);
+  const fetchSource = fixtureFetch();
+  const engine = await engineOn(fs, memoryJournal(), model, [], undefined, undefined, { fetchSource });
   const accept = async (m: ReturnType<typeof memo>) => assert.equal((await engine.accept(m)).kind, 'created');
 
   await accept(memo(2, '읽어볼 글 https://example.com/rag 그리고 https://example.com/dead', { source: 'share', domain_hint: 스터디 }));
@@ -65,7 +65,6 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
   const routed: string[] = [];
   for (let i = 0; i < 7; i++) routed.push((await engine.routeNext(NO_SIGNAL)).kind);
   assert.deepEqual(routed, ['routed', 'routed', 'routed', 'routed', 'routed', 'held', 'idle']);
-  for (const n of [2, 3]) cpSync(join(FIXTURE, '스터디', 'raw', `${ids[n]}.source.md`), join(root, '스터디', 'raw', `${ids[n]}.source.md`));
 
   const runUntilIdle = async (d: string, want: readonly string[]) => {
     const got: string[] = [];
@@ -73,6 +72,7 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
     assert.deepEqual(got, want, d);
   };
   await runUntilIdle(스터디, ['committed', 'committed', 'committed', 'retrying', 'retrying', 'gave-up']);
+  assert.deepEqual(fetchSource.calls, ['https://example.com/rag', 'https://example.com/dead', 'https://example.com/measure'], 'each link once; a feed memo only by its link line');
   assert.deepEqual(await engine.move(ids[6] as MemoId, 일상), { kind: 'released', domain: 일상 });
   await runUntilIdle(일상, ['committed', 'committed']);
 

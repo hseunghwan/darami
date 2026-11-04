@@ -11,6 +11,7 @@ import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
+import { articleFetcher } from './links/fetch';
 import { MODEL_PROFILES } from './agent/model';
 import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
 import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
@@ -107,6 +108,15 @@ export function observeJobs(listener: (n: JobNote) => void): () => void {
   return () => noteListeners.delete(listener);
 }
 
+const phoneFetchSource = articleFetcher({
+  http: fetch,
+  online: () => Network.getNetworkStateAsync().then((n) => n.isConnected !== false && n.isInternetReachable !== false, () => true),
+  setTimer: (ms, fire) => {
+    const t = setTimeout(fire, ms);
+    return () => clearTimeout(t);
+  },
+});
+
 /** One engine per kept wiki folder: two on one folder would each take the other's live job for stale. */
 let opened: { readonly uri: string; readonly engine: Promise<Engine>; unwatch: () => void } | null = null;
 
@@ -126,6 +136,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       now: () => new Date(),
       onEvent: note,
       photos: phonePhotoTools,
+      fetchSource: phoneFetchSource,
     });
     const mine = { uri: folder.tree.uri, engine, unwatch: () => {} };
     opened = mine;

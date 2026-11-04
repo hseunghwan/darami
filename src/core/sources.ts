@@ -1,6 +1,7 @@
 /**
- * The enrichment sidecar `<d>/raw/<id>.source.md`: which links in a memo get fetched, and the
- * file that records what came back. Pure, like pages.ts. Fetching the links comes with P6.
+ * The enrichment sidecar `<d>/raw/<id>.source.md`: which links in a memo get fetched, the words a
+ * failed fetch records, and the file that records what came back. Pure, like pages.ts. The
+ * fetching itself is src/links/fetch.ts, behind the FetchSource port.
  */
 
 import { splitFrontmatter, withFrontmatter, type MemoSource } from './pages';
@@ -117,6 +118,51 @@ export function parseSourceFile(text: string): Parsed<SourceFile> {
   }
   return { ok: true, value: { memo: data.memo as MemoId, fetchedAt: data.fetched_at, sources } };
 }
+
+/** `detail` of a failed entry. All but `video` and `charset` are dotoriwiki's words. */
+export const FETCH_DETAIL = {
+  http: (status: number) => `HTTP ${status}`,
+  notHtml: (contentType: string) => `not HTML: ${contentType || 'no content type'}`,
+  tooBig: 'body over 5 MB',
+  unreadable: 'no readable text',
+  timedOut: 'timed out',
+  /** dotoriwiki's describeError: the message, then the cause's code or message in parentheses. */
+  error: (message: string, cause: string | null) => `${message}${cause ? ` (${cause})` : ''}`,
+  /** darami has no transcript fetcher, so a video link is recorded and not read. */
+  video: 'videos are not fetched on the phone',
+  /** A page in an encoding the phone cannot decode. dotoriwiki's Node would have read it. */
+  charset: (label: string) => `charset ${label} is not supported`,
+} as const;
+
+/** dotoriwiki's article fetch: one GET with these headers, 15 s, 5 MB. */
+export const ARTICLE_FETCH = {
+  timeoutMs: 15_000,
+  maxBytes: 5 * 1024 * 1024,
+  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+  accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+} as const;
+
+const YOUTUBE_HOSTS: ReadonlySet<string> = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be']);
+
+/** dotoriwiki's kindOf, the host read by a regex: React Native's URL has no reliable `hostname`. */
+export function kindOf(url: string): SourceKind {
+  const host = /^https?:\/\/(?:[^@/?#]*@)?([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase() ?? '';
+  return YOUTUBE_HOSTS.has(host) ? 'video' : 'article';
+}
+
+/** dotoriwiki's tidy: spaces and tabs squeezed per line, lines trimmed, 3+ newlines folded to 2, trimmed. */
+export const tidy = (text: string): string =>
+  text.split('\n').map((l) => l.replace(/[ \t\u00a0]+/g, ' ').trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+/** One link's answer: an entry for the sidecar, or `offline` when no response came and the phone has no network. */
+export type LinkResult = FetchedSource | { readonly status: 'offline' };
+
+/**
+ * The engine's port for one link. Resolves for every outcome a page can have, a dead link
+ * included; rejects only on a bug, which fails the attempt as dotoriwiki's did. `signal` is the
+ * job's: leaving the foreground aborts the fetch.
+ */
+export type FetchSource = (url: string, locale: Locale, signal: AbortSignal) => Promise<LinkResult>;
 
 /** `2026-10-29T10:00:00+09:00` in the given zone, the shape captured_at uses. */
 export function isoWithOffset(at: Date, tz: string): string {

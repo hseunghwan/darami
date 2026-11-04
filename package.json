@@ -9,10 +9,12 @@
     "test": "TZ=Asia/Seoul jest",
     "icons": "node --no-warnings scripts/icons.mjs",
     "presets": "node --no-warnings scripts/presets.ts",
+    "charset": "node --no-warnings scripts/charset.ts",
     "check:private": "node --no-warnings scripts/check-private.mjs"
   },
   "dependencies": {
     "@expo/ui": "~58.0.25",
+    "@mozilla/readability": "0.6.0",
     "@types/jest": "30.0.0",
     "exifr": "7.1.3",
     "expo": "~58.0.21",
@@ -36,6 +38,7 @@
     "expo-system-ui": "~58.0.7",
     "jest": "~30.5.2",
     "jest-expo": "~58.0.13",
+    "linkedom": "0.18.14",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
@@ -52,6 +55,7 @@
     "@resvg/resvg-js": "2.6.2",
     "@types/node": "^24.19.2",
     "@types/react": "~19.3.0",
+    "iconv-lite": "0.6.3",
     "typescript": "~6.0.3"
   },
   "jest": {
@@ -61,6 +65,11 @@
     ],
     "setupFiles": [
       "<rootDir>/jest.setup.ts"
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|standard-navigation|linkedom|htmlparser2|css-select|css-what|domutils|domhandler|domelementtype|dom-serializer|entities|nth-check|boolbase))",
+      "/node_modules/react-native-reanimated/plugin/",
+      "/node_modules/@react-native/babel-preset/"
     ]
   }
 }

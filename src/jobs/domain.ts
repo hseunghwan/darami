@@ -13,13 +13,15 @@ import { paths, type WikiPath } from '../core/layout';
 import type { Ledger, VerdictId } from '../core/ledger';
 import {
   check, extractWikilinks, imageTargets, namesOf, pageMeta, parseAnswerId, parseAnswerStaging, parseMemoFile, parseMemoId, parsePageRef, renderAnswerPage, renderAnswerStaging, renderIndex, roleOf,
-  type AnswerFiling, type PageRef, type Problem,
+  type AnswerFiling, type Memo, type PageRef, type Problem,
 } from '../core/pages';
 import { orderKey } from '../core/places';
+import { isoWithOffset, linksToFetch, parseSourceFile, renderSourceFile, type SourceEntry } from '../core/sources';
 import { textFor, type Text } from '../core/text';
 import type { AnswerId, DomainName, MemoId } from '../core/types';
 import { composeSystemPrompt, readLedger } from '../core/wiki';
 import { runAgent } from '../agent/loop';
+import type { Unavailable } from '../agent/model';
 import type { Fs, ReadFs } from '../core/fs';
 import type { FilingRefusal } from './chat';
 import type { Ctx, Engine, JobRef, Pass, RunReport } from './engine';
@@ -42,6 +44,8 @@ export type SaveRefusal =
   | FilingRefusal
   /** A link the answer page would carry names no page now: the job would fail check() three times. `page` is the link as written. */
   | { readonly kind: 'missing-page'; readonly page: string };
+
+const OFFLINE_RETRY_MS = 2 * 60_000;
 
 const byOrder = (a: Candidate, b: Candidate) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0);
 const under = (d: DomainName, files: readonly WikiPath[]) => files.map((f) => f.slice(`${paths.wiki(d)}/`.length));
@@ -146,6 +150,34 @@ export function domainJobs(
     return broken ? (/\[\[(.+?)\]\] does not resolve/.exec(broken.detail)?.[1] ?? broken.detail) : null;
   }
 
+  /**
+   * raw/<id>.source.md, fetched once in a memo's life, as dotoriwiki's enrichIngest did after its
+   * marker. It is an input, not an output, so it is written with create and never through the
+   * job's transaction: no rollback or recovery deletes it, and every later attempt reads the same
+   * text. Only the engine writes it, so text that does not parse is a write cut off, fetched again
+   * when the memo still names links.
+   * `offline` from any link writes nothing, so the job waits for the network with no attempt spent.
+   */
+  async function ensureSidecar(config: WikiConfig, d: DomainName, id: MemoId, memo: Memo | null, signal: AbortSignal): Promise<string | null | Unavailable | 'cancelled'> {
+    const path = memoFile.source(d, id);
+    const there = await fs.readText(path);
+    if (there && parseSourceFile(there).ok) return there;
+    const urls = memo ? linksToFetch(memo.text, memo.source) : [];
+    // With no link to fetch it again from, a sidecar stays the input it is.
+    if (urls.length === 0) return there || null;
+    if (there) await fs.remove(path);
+    const sources: SourceEntry[] = [];
+    for (const url of urls) {
+      const r = await ctx.fetchSource(url, config.locale, signal);
+      if (signal.aborted) return 'cancelled';
+      if (r.status === 'offline') return { kind: 'unavailable', cause: 'network', detail: 'no network to fetch the memo\'s links', retryAfterMs: OFFLINE_RETRY_MS };
+      sources.push({ url, ...r });
+    }
+    const text = renderSourceFile({ memo: id, fetchedAt: isoWithOffset(ctx.now(), config.timeZone), sources }, textFor(config.locale));
+    if ((await fs.create(path, text)) === 'created') return text;
+    return (await fs.readText(path)) ?? text;
+  }
+
   async function settle(dc: DomainConfig, t: Text, tx: JobTx, job: JobRef, problems: readonly Problem[], verdict: VerdictId | null): Promise<RunReport> {
     if (verdict && problems.length === 0) {
       // Before the applied line: a commit never lands without its record, and a record whose line never landed counts for nothing.
@@ -216,10 +248,14 @@ export function domainJobs(
           }
           const { id } = picked;
           const raw = await fs.readText(memoFile.raw(d, id));
-          const inputs = new Map<WikiPath, string | null>([[memoFile.raw(d, id), raw]]);
-          const source = await fs.readText(memoFile.source(d, id));
-          if (source !== null) inputs.set(memoFile.source(d, id), source);
           const memo = parseMemoFile(raw ?? '');
+          const source = await ensureSidecar(config, d, id, memo.ok ? memo.value.memo : null, opts.signal);
+          if (source === 'cancelled' || (source !== null && typeof source !== 'string')) {
+            await tx.abandon();
+            return source === 'cancelled' ? { kind: 'cancelled', job: picked.ref } : { kind: 'unavailable', job: picked.ref, unavailable: source };
+          }
+          const inputs = new Map<WikiPath, string | null>([[memoFile.raw(d, id), raw]]);
+          if (source !== null) inputs.set(memoFile.source(d, id), source);
           const photos = memo.ok ? await ctx.photos.forModel(memo.value.memo, t) : [];
           const out = await runAgent(ctx.model, {
             profile: dc.modelProfile,
