@@ -10,7 +10,8 @@
     "icons": "node --no-warnings scripts/icons.mjs",
     "presets": "node --no-warnings scripts/presets.ts",
     "charset": "node --no-warnings scripts/charset.ts",
-    "check:private": "node --no-warnings scripts/check-private.mjs"
+    "check:private": "node --no-warnings scripts/check-private.mjs",
+    "vendor:exifr": "node --no-warnings scripts/vendor-exifr.ts"
   },
   "dependencies": {
     "@expo/ui": "~58.0.25",

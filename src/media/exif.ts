@@ -5,7 +5,8 @@
  */
 
 import './navigator';
-import exifr from 'exifr';
+// exifr's full bundle with its import() of Node's fs removed, which Hermes cannot parse (scripts/vendor-exifr.ts).
+import exifr from './vendor/exifr';
 import type { ExifTags } from '../core/photos';
 
 const OPTIONS = {
