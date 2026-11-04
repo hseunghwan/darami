@@ -11,8 +11,8 @@ import type { Locale } from './types';
 export type IngestPromptArgs = {
   readonly id: string;
   readonly hasSource: boolean;
-  /** Path, the `![[…]]` name, and the photo's metadata line, per photo. */
-  readonly photos: readonly { readonly path: string; readonly file: string; readonly line: string }[];
+  /** The `![[…]]` name and the photo's metadata line, per photo, in the order the images follow the prompt. */
+  readonly photos: readonly { readonly file: string; readonly line: string }[];
   /** The latest failure's ledger reason, kept across a retry. */
   readonly lastFailure: string | null;
 };

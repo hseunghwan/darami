@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { parseMemoFile, renderMemoFile, type Memo } from '../pages';
-import { fitWithin, jpegSize, photoFacts, photoLocation, sniffPhoto, takenAtOf, withEmbeds, withoutEmbeds, type Attachment } from '../photos';
+import { base64, fitWithin, jpegDataUrl, jpegSize, photoFacts, photoLocation, sniffPhoto, takenAtOf, withEmbeds, withoutEmbeds, type Attachment } from '../photos';
 import { memo, ulid } from './helpers';
 
 const SEOUL = { lat: 37.5665, lon: 126.978, place: '중구 태평로1가', address: '서울특별시 중구 세종대로 110' };
@@ -87,4 +87,14 @@ test('jpegSize reads the SOF marker past other segments, and nothing from bytes 
   assert.deepEqual(jpegSize(Uint8Array.from([0xff, 0xd8, ...app1, ...sof, 0xff, 0xd9])), { width: 64, height: 32 });
   assert.equal(jpegSize(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9, 0, 0, 0, 0, 0, 0, 0])), null);
   assert.equal(jpegSize(Uint8Array.from('<html></html>', (c) => c.charCodeAt(0))), null);
+});
+
+test('base64 matches RFC 4648 at every padding, and a data URL is a JPEG one', () => {
+  for (let n = 0; n < 12; n++) {
+    const b = Uint8Array.from({ length: n }, (_, i) => (i * 97 + 13) & 0xff);
+    assert.equal(base64(b), Buffer.from(b).toString('base64'), `${n} bytes`);
+  }
+  const big = Uint8Array.from({ length: 300_001 }, (_, i) => (i * 31) & 0xff);
+  assert.equal(base64(big), Buffer.from(big).toString('base64'));
+  assert.equal(jpegDataUrl(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])), 'data:image/jpeg;base64,/9j/2Q==');
 });

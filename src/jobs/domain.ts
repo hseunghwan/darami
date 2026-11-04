@@ -215,13 +215,17 @@ export function domainJobs(
             return report;
           }
           const { id } = picked;
-          const inputs = new Map<WikiPath, string | null>([[memoFile.raw(d, id), await fs.readText(memoFile.raw(d, id))]]);
+          const raw = await fs.readText(memoFile.raw(d, id));
+          const inputs = new Map<WikiPath, string | null>([[memoFile.raw(d, id), raw]]);
           const source = await fs.readText(memoFile.source(d, id));
           if (source !== null) inputs.set(memoFile.source(d, id), source);
+          const memo = parseMemoFile(raw ?? '');
+          const photos = memo.ok ? await ctx.photos.forModel(memo.value.memo, t) : [];
           const out = await runAgent(ctx.model, {
             profile: dc.modelProfile,
             instructions: ingestInstructions({ domainPrompt: await composeSystemPrompt(fs, paths.domainSchema(d)), domain: dc, date: today, t }),
-            prompt: t.ingest.prompt({ id, hasSource: source !== null, photos: [], lastFailure: history.lastFailure?.reason ?? null }),
+            prompt: t.ingest.prompt({ id, hasSource: source !== null, photos: photos.map(({ file, line }) => ({ file, line })), lastFailure: history.lastFailure?.reason ?? null }),
+            images: photos.map((p) => p.image),
             nudge: t.ingest.nudge,
             workspace: jobWorkspace({ fs, tx, declared: [...config.domains.keys()], reviewBefore }),
             limits: ctx.limits,

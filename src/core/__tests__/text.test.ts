@@ -8,7 +8,7 @@ const HANGUL = /[ᄀ-ᇿ㄰-㆏가-힯]/;
 
 /** Every template with sample arguments, so a test sees the text a run would. */
 function everything(t: Text): string[] {
-  const photos = [{ path: '/w/_attachments/A-1.jpg', file: 'A-1.jpg', line: t.photo(1, ['2026-10-29 08:10', 'Chicago']) }];
+  const photos = [{ file: 'A-1.jpg', line: t.photo(1, ['2026-10-29 08:10', 'Chicago']) }];
   const pages = [
     { pathUnderWiki: 'RAG.md', name: 'RAG', type: 'concept', summary: 'Retrieval' },
     { pathUnderWiki: 'x.md', name: 'x', type: null, summary: '' },

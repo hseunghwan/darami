@@ -41,8 +41,8 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
         hasSource ? `수집 자료 \`raw/${id}.source.md\`도 함께 읽는다.` : '',
         photos.length
           ? [
-              `원본에 사진 ${photos.length}장이 붙어 있다. 각 파일을 Read로 열어 보고 무엇이 찍혔는지 정리에 반영한다. 페이지에 넣을 때는 \`![[파일명]]\`으로 쓴다.`,
-              ...photos.map((p) => `- \`${p.path}\` (\`![[${p.file}]]\`) ${p.line}`),
+              `원본에 사진 ${photos.length}장이 붙어 있다. 이미지는 이 글 뒤에 아래 순서대로 들어 있다. 무엇이 찍혔는지 보고 정리에 반영한다. 페이지에 넣을 때는 \`![[파일명]]\`으로 쓴다.`,
+              ...photos.map((p) => `- ${p.line} (\`![[${p.file}]]\`)`),
             ].join('\n')
           : '',
         lastFailure ? `\n지난 시도는 서버 검사에서 실패해 되돌려졌다. 이유: ${lastFailure}\n같은 문제가 없도록 처음부터 다시 해라.` : '',

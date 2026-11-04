@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import type { InputItem } from '../../codex/responses';
+import { jpegDataUrl } from '../../core/photos';
 import { CHAT_LIMITS, CHAT_TOOLS, LIMITS, runAgent, runChat, TOOLS, type AgentRequest, type ChatProgress, type ChatRequest, type Reader, type Refused, type Shown, type Workspace } from '../loop';
 import { fakeModel, plays, turn } from './fake-model';
 
@@ -18,7 +19,7 @@ function echoWorkspace(): Workspace & { calls: string[] } {
 }
 
 const request = (ws: Workspace, over: Partial<AgentRequest> = {}): AgentRequest => ({
-  profile: null, instructions: 'rules', prompt: 'file raw/A.md', nudge: 'call finish', workspace: ws, limits: LIMITS,
+  profile: null, instructions: 'rules', prompt: 'file raw/A.md', images: [], nudge: 'call finish', workspace: ws, limits: LIMITS,
   signal: new AbortController().signal, now: () => 0, ...over,
 });
 
@@ -32,6 +33,15 @@ test('each tool call goes to the workspace and its answer comes back in the next
   assert.deepEqual(outputs(model.requests.at(-1)!.input), ['text of raw/A.md', 'files of wiki', 'hits of RAG 청크', 'wrote wiki/RAG.md (1)', 'edited wiki/RAG.md']);
   assert.deepEqual(model.requests[0]!.tools, TOOLS);
   assert.equal(model.requests[0]!.instructions, 'rules');
+});
+
+test('the photos follow the prompt on the first user message, and that message goes out unchanged on every turn', async () => {
+  const images = [jpegDataUrl(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])), jpegDataUrl(Uint8Array.from([0xff, 0xd8, 0x00, 0xff, 0xd9]))];
+  const model = fakeModel({ ingest: plays(turn.read('raw/A.md'), turn.finish('created')) });
+  await runAgent(model, request(echoWorkspace(), { images }));
+  const first = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'file raw/A.md' }, { type: 'input_image', image_url: 'data:image/jpeg;base64,/9j/2Q==' }, { type: 'input_image', image_url: 'data:image/jpeg;base64,/9gA/9k=' }] };
+  assert.deepEqual(model.requests.map((r) => r.input[0]), [first, first]);
+  assert.equal(JSON.stringify(model.requests.map((r) => r.input.slice(1))).includes('input_image'), false, 'only the first message carries them');
 });
 
 test('a turn goes back as input: the call unchanged, a message as assistant text, reasoning dropped', async () => {
