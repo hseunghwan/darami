@@ -12,9 +12,10 @@ import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
 import { articleFetcher } from './links/fetch';
-import { MODEL_PROFILES, NO_CHOICE, parseModelChoice, type ModelChoice, type RoleModel } from './agent/model';
+import { MODEL_PROFILES, NO_CHOICE, parseModelChoice, settleChoice, type ModelChoice, type RoleModel } from './agent/model';
+import { cacheText, listModels, parseCache, type ListedModel } from './codex/models';
 import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
-import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
+import { credentials, loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
 import { documentUri, parseSafTree, type SafTree } from './fs/saf-uri';
 import { buildMemoRequest, type GeoFix } from './lib/capture';
@@ -62,10 +63,12 @@ export type App = {
   online: boolean | null;
   /** The models picked in Settings, kept in kv `models`. */
   models: ModelChoice;
+  /** The last list the endpoint gave, kept in kv `models.list`; null before the first. `fetch` is how the latest ask went. */
+  modelList: { readonly list: readonly ListedModel[] | null; readonly fetch: 'idle' | 'loading' | 'failed' };
 };
 
 let app: App = {
-  ready: false, settings: { location: false, theme: 'system' }, folder: null, jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null, models: NO_CHOICE,
+  ready: false, settings: { location: false, theme: 'system' }, folder: null, jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null, models: NO_CHOICE, modelList: { list: null, fetch: 'idle' },
 };
 const listeners = new Set<() => void>();
 
@@ -95,6 +98,31 @@ export async function pickModel(role: keyof ModelChoice, pick: RoleModel | null)
   set({ models });
   await kv.set('models', JSON.stringify(models));
   void runner.modelPicked();
+}
+
+/** The pick with each effort settled against the list, as the engine runs it and Settings shows it. */
+export const modelsInUse = (a: App): ModelChoice => settleChoice(a.models, a.modelList.list);
+
+let listing: Promise<void> | null = null;
+
+/** Asks the endpoint for the plan's models. A failure keeps the last list, so Settings works offline. */
+export function loadModels(): Promise<void> {
+  listing ??= (async () => {
+    set({ modelList: { ...app.modelList, fetch: 'loading' } });
+    const c = await credentials(fetch).catch(() => null);
+    const r = c?.ok ? await listModels(fetch, c.creds) : null;
+    if (r?.ok) {
+      set({ modelList: { list: r.models, fetch: 'idle' } });
+      await kv.set('models.list', cacheText(r.models)).catch(() => {});
+    } else {
+      set({ modelList: { ...app.modelList, fetch: 'failed' } });
+    }
+    // The emulator run reads the list from logcat.
+    if (__DEV__) console.log(r?.ok ? `MODELS ${r.models.length} listed: ${r.models.map((m) => m.slug).join(',')}` : `MODELS failed: ${r ? `${r.failure.kind} ${'detail' in r.failure ? r.failure.detail : ''}` : 'no login'}`);
+  })().finally(() => {
+    listing = null;
+  });
+  return listing;
 }
 
 /** model_profile names a key of agent/model.ts MODELS.ingest, so a profile added there stops warning with no second list. */
@@ -141,7 +169,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       journal: sqliteJournal(folder.tree.uri),
       book: sqliteBook(folder.tree.uri),
       chats: sqliteChats(folder.tree.uri),
-      model: phoneModel(() => app.models),
+      model: phoneModel(() => modelsInUse(app)),
       machine: MACHINE,
       now: () => new Date(),
       onEvent: note,
@@ -517,13 +545,14 @@ let booted: Promise<void> | null = null;
 
 export function boot(): Promise<void> {
   booted ??= (async () => {
-    const [settings, folder, session, models] = await Promise.all([
+    const [settings, folder, session, models, list] = await Promise.all([
       kv.get('settings').then(parseSettings),
       kv.get('folder').then(parseFolder),
       loadSession().catch(() => ({ kind: 'none' }) as const),
       kv.get('models').then(parseModelChoice, () => NO_CHOICE),
+      kv.get('models.list').then(parseCache, () => null),
     ]);
-    set({ ready: true, settings, folder, login: loginOf(session, false), models });
+    set({ ready: true, settings, folder, login: loginOf(session, false), models, modelList: { list, fetch: 'idle' } });
     void recheckFolder();
     const draft = parseSavedDraft(await kv.get(DRAFT_KEY).catch(() => null));
     sweepPending(new Set(draft?.photos.map((p) => fileName(p.uri)) ?? []));
