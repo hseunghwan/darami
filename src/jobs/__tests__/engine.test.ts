@@ -90,7 +90,7 @@ test('an unavailable classifier leaves the inbox as it was and spends nothing', 
   assert.equal(w.model.requests.length, 1, 'no second try on unavailable');
 });
 
-test('accept writes the inbox once, a resend changes nothing, and a memo with photos waits for P6', async () => {
+test('accept writes the inbox once, and a resend changes nothing', async () => {
   const w = await wiki({});
   assert.deepEqual(await w.engine.accept(memo(1, 'x', { domain_hint: '일상' })), { kind: 'created' });
   assert.deepEqual(await w.engine.accept(memo(1, 'x', { domain_hint: '일상' })), { kind: 'duplicate', at: 'inbox' });
@@ -100,7 +100,6 @@ test('accept writes the inbox once, a resend changes nothing, and a memo with ph
   assert.equal((await w.engine.routeNext(NO_SIGNAL)).kind, 'idle');
   const before = snapshot(w.root);
   assert.deepEqual(await w.engine.accept(memo(2, 'x', { domain_hint: '스터디' })), { kind: 'duplicate', at: { domain: 스터디, state: 'routed' } });
-  assert.deepEqual(await w.engine.accept(memo(3, 'x', { attachments: [{ n: 1, origin: 'camera' }] })), { kind: 'photos-unsupported' });
   assert.deepEqual(changed(before, snapshot(w.root)), []);
 });
 

@@ -12,7 +12,7 @@ import { committedPages, dayIn, ingestInstructions } from '../core/filing';
 import { paths, type WikiPath } from '../core/layout';
 import type { Ledger, VerdictId } from '../core/ledger';
 import {
-  check, extractWikilinks, namesOf, pageMeta, parseAnswerId, parseAnswerStaging, parseMemoFile, parseMemoId, parsePageRef, renderAnswerPage, renderAnswerStaging, renderIndex, roleOf,
+  check, extractWikilinks, imageTargets, namesOf, pageMeta, parseAnswerId, parseAnswerStaging, parseMemoFile, parseMemoId, parsePageRef, renderAnswerPage, renderAnswerStaging, renderIndex, roleOf,
   type AnswerFiling, type PageRef, type Problem,
 } from '../core/pages';
 import { orderKey } from '../core/places';
@@ -114,7 +114,7 @@ export function domainJobs(
       allowedTypes: new Set([...dc.pageTypes.map((p) => p.type), 'answer']),
       outsideWrites,
       modifiedInputs,
-      attachments: new Set(await fs.list(paths.attachments)),
+      attachments: await ctx.photos.existing(fs, imageTargets(contents.values())),
     });
   }
 
@@ -140,7 +140,7 @@ export function domainJobs(
       allowedTypes: new Set([...dc.pageTypes.map((p) => p.type), 'answer']),
       outsideWrites: [],
       modifiedInputs: [],
-      attachments: new Set(await committed.list(paths.attachments)),
+      attachments: await ctx.photos.existing(committed, imageTargets([page.content])),
     });
     const broken = problems.find((p) => p.rule === 'broken-link');
     return broken ? (/\[\[(.+?)\]\] does not resolve/.exec(broken.detail)?.[1] ?? broken.detail) : null;

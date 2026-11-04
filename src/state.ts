@@ -8,6 +8,7 @@ import { parseMemo, type PageRef } from './core/pages';
 import type { ChatTarget, DomainName, MemoId } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { phoneModel } from './agent/codex';
+import { phonePhotoTools } from './media/phone';
 import { MODEL_PROFILES } from './agent/model';
 import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
 import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
@@ -21,7 +22,7 @@ import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
 import {
-  openEngine, type ChatProgress, type ChatSummary, type ChatView, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type PageView, type Question, type ReleaseResult, type TurnRef,
+  openEngine, type ChatProgress, type ChatSummary, type ChatView, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type PageView, type PhotoRefusal, type Question, type ReleaseResult, type TurnRef,
 } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteChats, sqliteJournal } from './jobs/sqlite';
@@ -120,6 +121,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       machine: MACHINE,
       now: () => new Date(),
       onEvent: note,
+      photos: phonePhotoTools,
     });
     const mine = { uri: folder.tree.uri, engine, unwatch: () => {} };
     opened = mine;
@@ -235,7 +237,9 @@ export type Filed =
   | { readonly kind: 'no-wiki' }
   | { readonly kind: 'invalid'; readonly detail: string }
   /** The folder threw part way; sending again with the same id finishes it. */
-  | { readonly kind: 'failed'; readonly message: string };
+  | { readonly kind: 'failed'; readonly message: string }
+  /** Nothing was written: photo n is gone, unreadable on this phone, or other bytes than an earlier send of this draft. */
+  | PhotoRefusal;
 
 /** Resolves only after accept answers, so the caller clears its draft on `filed` and on nothing else. */
 export async function fileMemo(c: Capture): Promise<Filed> {
@@ -245,7 +249,7 @@ export async function fileMemo(c: Capture): Promise<Filed> {
     const engine = await usableEngine();
     if (!engine) return { kind: 'no-wiki' };
     const r = await engine.accept(parsed.value);
-    if (r.kind === 'photos-unsupported') return { kind: 'invalid', detail: r.kind };
+    if (r.kind === 'photo-refused') return r;
     void runner.trigger();
     return { kind: 'filed' };
   } catch (e) {

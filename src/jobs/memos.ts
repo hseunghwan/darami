@@ -17,7 +17,8 @@ import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { readPlaces } from '../core/wiki';
 import { classify, type Unavailable } from '../agent/model';
-import type { Ctx, Engine, Pass, ReleaseResult, RouteReport } from './engine';
+import type { AcceptResult, Ctx, Engine, Pass, ReleaseResult, RouteReport } from './engine';
+import { NO_PENDING } from './photos';
 
 export const memoFile = {
   inbox: (id: MemoId) => `${paths.inbox}/${id}.md` as WikiPath,
@@ -160,11 +161,14 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
   }
 
   return {
-    accept(input) {
-      if (input.attachments.length) return Promise.resolve({ kind: 'photos-unsupported' });
-      return ctx.memoLane(async () => {
+    async accept(input, pending = NO_PENDING) {
+      const past = ctx.book.located(input.id);
+      if (past && past !== 'inbox') return { kind: 'duplicate', at: past };
+      const attachments = input.attachments.length ? await ctx.photoLane(() => ctx.photos.attachAll(input, pending)) : [];
+      if ('kind' in attachments) return attachments;
+      const r = await ctx.memoLane(async (): Promise<AcceptResult> => {
         const path = memoFile.inbox(input.id);
-        const wrote = await fs.create(path, renderMemoFile({ ...input, attachments: [] }, null));
+        const wrote = await fs.create(path, renderMemoFile({ ...input, attachments }, null));
         const at = ctx.book.located(input.id);
         if (at && at !== 'inbox') {
           if (wrote === 'created') await fs.remove(path);
@@ -172,6 +176,8 @@ export function memoTransitions(ctx: Ctx): Pick<Engine, 'accept' | 'routeNext' |
         }
         return wrote === 'created' ? { kind: 'created' } : { kind: 'duplicate', at: 'inbox' };
       });
+      if (attachments.length) await ctx.photos.settled(input.id);
+      return r;
     },
 
     routeNext(signal, pass) {

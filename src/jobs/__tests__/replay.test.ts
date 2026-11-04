@@ -2,17 +2,17 @@
  * dotoriwiki's own scenario, from scripts/make-dotoriwiki-fixture.ts, replayed through darami's
  * engine with the same fake model answers: the folder it leaves is made-by-dotoriwiki byte for byte.
  * That fixture is what dotoriwiki 91f0aac wrote, so every ledger line, index.md, _review.md, memo
- * file, routing, and answer page here is held to dotoriwiki's bytes, not to darami's own output.
+ * file, routing, photo record, and answer page here is held to dotoriwiki's bytes, not to darami's
+ * own output. Memo 5's photos go through accept with the copying fake, as dotoriwiki's script
+ * faked its shrink.
  *
- * Two things are put in by hand, as P6 will do them: memo 5 carries photos, which accept refuses
- * until P6, so its inbox file is written as dotoriwiki's accept wrote it; and the link sidecars of
- * memos 2 and 3 are copied in, because P3 does not fetch links.
+ * One thing is still put in by hand: the link sidecars of memos 2 and 3 are copied in.
  */
 
 import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseMemoFile, renderAnswerStaging, renderMemoFile, type AnswerFiling } from '../../core/pages';
+import { renderAnswerStaging, type AnswerFiling } from '../../core/pages';
 import type { AnswerId, DomainName, MemoId } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import { memo, page, ulid, validFields } from '../../core/__tests__/helpers';
@@ -34,7 +34,6 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
   const root = await presetWiki('ko');
   const yaml = readFileSync(join(root, 'dotoriwiki.yaml'), 'utf8');
   writeFileSync(join(root, 'dotoriwiki.yaml'), `${yaml.replace('    agents_may_read: true\n', '    agents_may_read: true\n    model_profile: strong\n')}feeds:\n  geeknews: { domain: 스터디 }\n`);
-  cpSync(join(FIXTURE, '_attachments'), join(root, '_attachments'), { recursive: true });
 
   let tries6 = 0;
   const model = fakeModel({
@@ -58,11 +57,9 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
   await accept(memo(2, '읽어볼 글 https://example.com/rag 그리고 https://example.com/dead', { source: 'share', domain_hint: 스터디 }));
   await accept(memo(3, '[GeekNews] 측정 먼저\n원문: https://example.com/measure\n게시: 2026-10-28\n토론: https://news.hada.io/topic?id=1\n\n요약 속 링크 https://other.example/b', { source: 'feed', domain_hint: 스터디 }));
   await accept(memo(4, '노트 앱에서 RAG 실험 중', { source: 'agent', domain_hint: 스터디, context: { project: 'notes-app', cwd: '/w/notes-app', branch: 'main' } }));
-  const photo = parseMemoFile(readFileSync(join(FIXTURE, '일상', 'raw', `${ids[5]}.md`), 'utf8'));
-  assert.ok(photo.ok);
-  assert.equal(photo.value.memo.text, '친구랑 놀이터');
-  assert.deepEqual(photo.value.memo.location, SEOUL);
-  writeFileSync(join(root, 'inbox', `${ids[5]}.md`), renderMemoFile(photo.value.memo, null));
+  const photos = [1, 2].map((n) => new Uint8Array(readFileSync(join(FIXTURE, '_attachments', `${ids[5]}-${n}.jpg`))));
+  const requests = [{ n: 1, origin: 'gallery', place: '종로구 사직동', address: null }, { n: 2, origin: 'camera', place: null, address: null }];
+  assert.equal((await engine.accept(memo(5, '친구랑 놀이터', { domain_hint: 일상, attachments: requests, location: SEOUL }), async (n) => photos[n - 1]!)).kind, 'created');
   await accept(memo(6, '세 번 실패할 메모', { domain_hint: 스터디 }));
   await accept(memo(7, '애매한 메모'));
   const routed: string[] = [];
@@ -89,9 +86,17 @@ test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte'
   stage(9, '측정은 언제 하지?', []);
   await accept(memo(1, '아직 분류 전인 메모'));
 
-  // The fixture leaves out .gitignore, as the script that made it did.
+  // The fixture leaves out .gitignore and _originals/, as the script that made it did. .nomedia is darami's, for the phone's gallery.
   const ours = snapshot(root);
   ours.delete('.gitignore');
+  for (const n of [1, 2]) {
+    assert.equal(ours.get(`_originals/${ids[5]}-${n}.jpg`), Buffer.from(photos[n - 1]!).toString('latin1'), `original ${n}`);
+    ours.delete(`_originals/${ids[5]}-${n}.jpg`);
+  }
+  for (const dir of ['_originals', '_attachments']) {
+    assert.equal(ours.get(`${dir}/.nomedia`), '', dir);
+    ours.delete(`${dir}/.nomedia`);
+  }
   const theirs = snapshot(FIXTURE);
   assert.deepEqual([...ours.keys()], [...theirs.keys()], 'the same files');
   for (const [p, bytes] of theirs) assert.equal(Buffer.from(ours.get(p)!, 'latin1').toString('utf8'), Buffer.from(bytes, 'latin1').toString('utf8'), p);

@@ -109,6 +109,18 @@ describe.each(books)('the %s book store', (_, make) => {
     assert.deepEqual([...headers].sort((a, b) => a.id.localeCompare(b.id)), [header(1), header(2)]);
     assert.deepEqual(commits, [commit(['Second.md'])]);
   });
+
+  test('a photo write keeps its first time, lists in the order written, and goes with its memo', async () => {
+    const s = make();
+    const w = (n: number, path: string, at: string) => ({ id: header(n).id, path: path as WikiPath, at });
+    await s.putPhotoWrite(w(1, '_originals/a-1.jpg', '2026-10-29T00:00:00.000Z'));
+    await s.putPhotoWrite(w(1, '_attachments/a-1.jpg', '2026-10-29T00:00:01.000Z'));
+    await s.putPhotoWrite(w(2, '_originals/b-1.png', '2026-10-29T00:00:02.000Z'));
+    await s.putPhotoWrite(w(1, '_originals/a-1.jpg', '2026-11-01T00:00:00.000Z'));
+    assert.deepEqual(await s.photoWrites(), [w(1, '_originals/a-1.jpg', '2026-10-29T00:00:00.000Z'), w(1, '_attachments/a-1.jpg', '2026-10-29T00:00:01.000Z'), w(2, '_originals/b-1.png', '2026-10-29T00:00:02.000Z')]);
+    await s.dropPhotoWrites(header(1).id);
+    assert.deepEqual(await s.photoWrites(), [w(2, '_originals/b-1.png', '2026-10-29T00:00:02.000Z')]);
+  });
 });
 
 test('the SQL book store sees only its own folder, and drops a row a hand edit broke', async () => {

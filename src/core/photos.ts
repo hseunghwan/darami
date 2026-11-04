@@ -203,6 +203,21 @@ export function jpegSize(b: Uint8Array): { readonly width: number; readonly heig
   return null;
 }
 
+/** dotoriwiki's ORPHAN_PHOTO_MS: what an accept wrote for a memo that never came waits this long before it is swept. */
+export const ORPHAN_PHOTO_MS = 7 * 24 * 3_600_000;
+
+/** SOI first and EOI last. Copies are re-encoded with no EXIF or trailer, so a cut-off copy fails this. */
+export const wholeJpeg = (b: Uint8Array): boolean => b.length >= 4 && b[0] === 0xff && b[1] === 0xd8 && b[b.length - 2] === 0xff && b[b.length - 1] === 0xd9;
+
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** `kept` is a proper prefix of `bytes`: what a create of `bytes` cut off part way leaves. */
+export const isPrefixOf = (kept: Uint8Array, bytes: Uint8Array): boolean => kept.length < bytes.length && sameBytes(kept, bytes.subarray(0, kept.length));
+
 export function describeDevice(d: PhotoDevice | null): string | null {
   if (!d || (!d.make && !d.model)) return null;
   // Apple writes "Apple" / "iPhone 15"; Samsung writes "samsung" / "SM-S928N". Don't repeat a make the model already starts with.

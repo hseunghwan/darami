@@ -29,6 +29,7 @@ import { parseLedger, type Ledger } from '../core/ledger';
 import { MEMO_SOURCES, pageMeta, parseMemoFile, parseMemoId, type Memo, type MemoSource, type Routing } from '../core/pages';
 import { answerIdsIn, answerPlacements, locate, memoIds, memoIdsIn, orderKey, placementOf, type AnswerPlacement, type Located, type Placement, type Places } from '../core/places';
 import type { AnswerId, DomainName, MemoId } from '../core/types';
+import type { PhotoWrites } from './photos';
 import type { JournalStore } from './transaction';
 
 export type MemoRow = {
@@ -81,6 +82,8 @@ export type MemoDetail = {
   readonly at: Placement;
   /** Ingested only: the recorded pages, or the ledger's with the type each page has now. */
   readonly pages: readonly ChangedPage[];
+  /** The copies in _attachments/ its photos are, in memo order. */
+  readonly photos: readonly string[];
 };
 
 export type Book = {
@@ -113,7 +116,7 @@ const headerOf = (m: Memo): MemoHeader => ({
 export type CommitRecord = { readonly domain: DomainName; readonly id: MemoId; readonly at: string; readonly pages: readonly CommittedPage[] };
 
 /** One wiki folder's rows: SQLite on the phone (sqlite.ts), memory under jest. */
-export type BookStore = {
+export type BookStore = PhotoWrites & {
   load(): Promise<{ readonly headers: readonly MemoHeader[]; readonly commits: readonly CommitRecord[] }>;
   /** A header never changes, so the first one stored for an id stays. */
   putHeaders(headers: readonly MemoHeader[]): Promise<void>;
@@ -571,7 +574,11 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
       const file = memoIn(`${id}.md`, await fs.readText(fileOf(id, at)));
       if (!file) return null;
       const { memo, routing } = file;
-      return { id, text: memo.text, capturedAt: memo.capturedAt, place: memo.location?.place ?? null, source: memo.source, routing, at, pages: at.state === 'ingested' ? await pagesOf(at, id) : [] };
+      return {
+        id, text: memo.text, capturedAt: memo.capturedAt, place: memo.location?.place ?? null, source: memo.source, routing, at,
+        pages: at.state === 'ingested' ? await pagesOf(at, id) : [],
+        photos: memo.attachments.map((a) => a.file),
+      };
     },
   };
 }
