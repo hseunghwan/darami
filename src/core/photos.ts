@@ -1,6 +1,7 @@
 /**
- * Photos on memos: how a photo's record sits in the memo file. Pure. Reading the record out of an
- * original's bytes, storing the bytes, and making the 2048 px copy come with P6.
+ * Photos on memos: the record dotoriwiki's photos.ts derives from an original's tags, and how it
+ * sits in the memo file. Pure: reading the tags (src/media/exif.ts) and storing bytes
+ * (src/jobs/photos.ts) happen outside core.
  *
  *   _originals/<id>-<n>.<ext>    the bytes the phone sent
  *   _attachments/<id>-<n>.jpg    the copy pages embed with ![[...]]
@@ -12,6 +13,8 @@ import type { GeoPoint, MemoId, Parsed } from './types';
 export const MAX_PHOTOS = 10;
 export const PHOTO_ORIGINS = ['gallery', 'camera', 'share'] as const;
 export type PhotoOrigin = (typeof PHOTO_ORIGINS)[number];
+export const PHOTO_EXTS = ['jpg', 'png', 'webp', 'heic'] as const;
+export type PhotoExt = (typeof PHOTO_EXTS)[number];
 
 /** What the phone says about photo n: where it came from, and the geocoded name of its own GPS fix. */
 export type AttachmentRequest = { readonly n: number; readonly origin: PhotoOrigin; readonly place: string | null; readonly address: string | null };
@@ -44,9 +47,116 @@ export type Attachment = {
 
 export const photoStem = (id: MemoId, n: number) => `${id}-${n}`;
 export const attachmentName = (id: MemoId, n: number) => `${photoStem(id, n)}.jpg`;
+export const originalName = (id: MemoId, n: number, ext: PhotoExt) => `${photoStem(id, n)}.${ext}`;
 
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|avif)$/i;
 export const isImageLink = (target: string) => IMAGE_EXT.test(target);
+
+/** The type from magic bytes. The name and MIME a photo came with are not trusted. */
+export function sniffPhoto(b: Uint8Array): PhotoExt | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
+  if (ascii(0, 8) === '\x89PNG\r\n\x1a\n') return 'png';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'webp';
+  if (ascii(4, 8) === 'ftyp' && ['heic', 'heix', 'hevc', 'heim', 'heis', 'mif1', 'msf1'].includes(ascii(8, 12))) return 'heic';
+  return null;
+}
+
+/**
+ * What exifr answered for dotoriwiki's options (tiff, exif, and gps, values neither revived nor
+ * translated, output merged), as src/media/exif.ts returns it. Untrusted: photoFacts reads only
+ * the tags it names and checks each one's type.
+ */
+export type ExifTags = Readonly<Record<string, unknown>>;
+
+const str = (v: unknown) => (typeof v === 'string' && v.replace(/\0/g, '').trim() !== '' ? v.replace(/\0/g, '').trim() : null);
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const round = (n: number, places: number) => Math.round(n * 10 ** places) / 10 ** places;
+
+/** The zone's offset at that UTC instant, `+09:00`. */
+function offsetIn(tz: string, at: Date): string {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(at).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  return name === 'GMT' ? '+00:00' : name.slice(3);
+}
+
+/** `2026:10:12 14:03:22` plus its offset tag, or the memo's zone when the camera wrote none. */
+export function takenAtOf(dateTime: string | null, offset: string | null, tz: string): string | null {
+  const m = dateTime ? /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(dateTime) : null;
+  if (!m || m[1] === '0000') return null;
+  const wall = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`;
+  if (offset && /^[+-]\d{2}:\d{2}$/.test(offset)) return `${wall}${offset}`;
+  // The wall time read as UTC is off by the offset at most, which only matters within hours of a DST switch.
+  return `${wall}${offsetIn(tz, new Date(`${wall}Z`))}`;
+}
+
+const exposureOf = (t: number | null) => (t === null || t <= 0 ? null : t >= 1 ? `${round(t, 1)}s` : `1/${Math.round(1 / t)}`);
+
+export type PhotoFacts = Pick<Attachment, 'width' | 'height' | 'takenAt' | 'device' | 'camera'> & { readonly gps: { readonly lat: number; readonly lon: number } | null };
+
+/** dotoriwiki's photoFacts, with the tags read outside core. */
+export function photoFacts(t: ExifTags, tz: string): PhotoFacts {
+  const device: PhotoDevice = { make: str(t.Make), model: str(t.Model), lens: str(t.LensModel), software: str(t.Software) };
+  const flash = num(t.Flash);
+  const fNumber = num(t.FNumber);
+  const camera: PhotoCamera = {
+    exposure: exposureOf(num(t.ExposureTime)),
+    fNumber: fNumber === null ? null : round(fNumber, 1),
+    iso: num(t.ISO),
+    focal35mm: num(t.FocalLengthIn35mmFormat),
+    flash: flash === null ? null : (flash & 1) === 1,
+  };
+  const w = num(t.ExifImageWidth);
+  const h = num(t.ExifImageHeight);
+  // Orientations 5–8 are stored sideways: the photo as seen is the other way round.
+  const sideways = (num(t.Orientation) ?? 1) >= 5;
+  const lat = num(t.latitude);
+  const lon = num(t.longitude);
+  return {
+    width: sideways ? h : w,
+    height: sideways ? w : h,
+    takenAt: takenAtOf(str(t.DateTimeOriginal), str(t.OffsetTimeOriginal), tz),
+    device: Object.values(device).some((v) => v !== null) ? device : null,
+    camera: Object.values(camera).some((v) => v !== null) ? camera : null,
+    // 0,0 is what some apps write for "no fix".
+    gps: lat !== null && lon !== null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat !== 0 || lon !== 0) ? { lat: round(lat, 5), lon: round(lon, 5) } : null,
+  };
+}
+
+/**
+ * The photo's own GPS when it had one. A camera photo without GPS was taken just now, so the
+ * memo's fix stands in. An old photo from the gallery or a share says nothing about where the
+ * memo was written, so it gets none.
+ */
+export function photoLocation(gps: PhotoFacts['gps'], req: AttachmentRequest, memoFix: GeoPoint | null): PhotoLocation | null {
+  if (gps) return { ...gps, place: req.place, address: req.address, from: 'exif' };
+  if (req.origin === 'camera' && memoFix) return { ...memoFix, from: 'device' };
+  return null;
+}
+
+/** The record of photo n. Everything but `origin` and the place names comes from the stored original, so a rerun rebuilds the same record. */
+export function attachmentOf(a: {
+  readonly id: MemoId;
+  readonly req: AttachmentRequest;
+  readonly ext: PhotoExt;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly facts: PhotoFacts;
+  readonly memoFix: GeoPoint | null;
+}): Attachment {
+  return {
+    file: attachmentName(a.id, a.req.n),
+    original: originalName(a.id, a.req.n, a.ext),
+    sha256: a.sha256,
+    bytes: a.bytes,
+    width: a.facts.width,
+    height: a.facts.height,
+    origin: a.req.origin,
+    takenAt: a.facts.takenAt,
+    location: photoLocation(a.facts.gps, a.req, a.memoFix),
+    device: a.facts.device,
+    camera: a.facts.camera,
+  };
+}
 
 export function describeDevice(d: PhotoDevice | null): string | null {
   if (!d || (!d.make && !d.model)) return null;
