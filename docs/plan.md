@@ -208,8 +208,8 @@ Checked on 2026-11-05.
 - The APK installed on a clean Android 15 emulator that never had darami, and opened on the login step that the README describes. The rest of the clean-phone walkthrough waits for a ChatGPT device-code approval. Two codes expired unapproved.
 - No release exists yet. Tagging `v*` makes CI attach the APK and its checksum to a GitHub release.
 - The starter `dotoriwiki.yaml` in both presets still carries dotoriwiki's comments about the gateway and `models.json`. The README warns about them.
+- The author's dotoriwiki wiki is not moved. darami is a separate app with its own wiki (decided with the user on 2026-11-05).
 - Still open:
-  - moving the author's live wiki to a phone folder
   - opening the same folder in Obsidian on the phone (Done when 5)
 
 ## Shape
@@ -242,7 +242,7 @@ Each phase ends in a check. A later phase starts only after the earlier one pass
 | P4 | Rewire the screens: compose, activity, memo detail, held, and settings read the local queue and the wiki. Delete pairing, the outbox, and the gateway client. Settings show the login and the folder. | App tests pass. On the emulator the whole flow works with the network on, and a memo sent offline waits and is filed when the network returns. |
 | P5 | Chat with read-only tools and streamed answers, and filing an answer through the ingest path. | A chat answer cites wiki pages and changes no file. A filed answer shows up as a page and a ledger line. |
 | P6 | Photos: shrink to 2048 px with `expo-image-manipulator`, store the original in `_originals/` and the copy in `_attachments/` as dotoriwiki does, and send them to the model as images. Links: fetch an article, extract its text, and attach it to the memo. | A memo with a photo and a link is filed with both. |
-| P7 | Rewrite the README in English and Korean around the app and its Codex login. Move the author's live wiki to the phone folder. | CI builds a release APK. The README walkthrough works on a clean phone. |
+| P7 | Rewrite the README in English and Korean around the app and its Codex login. | CI builds a release APK. The README walkthrough works on a clean phone. |
 
 P0 decides whether the plan stands, so nothing else starts before it passes. P1 keeps the on-disk format, `dotoriwiki.yaml` included, so a wiki dotoriwiki made and a wiki darami made stay the same thing.
 
