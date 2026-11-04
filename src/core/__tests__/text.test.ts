@@ -21,7 +21,7 @@ function everything(t: Text): string[] {
     t.ingest.prompt({ id: 'A', hasSource: true, photos, lastFailure: 'empty x.md: page has no body' }),
     t.ingest.prompt({ id: 'A', hasSource: false, photos: [...photos, ...photos], lastFailure: null }),
     t.ingest.workspace('learning'), t.ingest.nudge,
-    t.chatRules('root'), t.chatRules('domain'),
+    t.chat.rules(null), t.chat.rules('learning'), t.chat.workspace(null), t.chat.workspace('learning'), t.chat.wrapUp,
     renderIndex('learning', pages, ['concept'], t),
     t.reviewTitle, t.answer.cited, t.answer.none,
     t.sidecar.truncated(40_000, 30_000), t.sidecar.fetchFailed('HTTP 500'),

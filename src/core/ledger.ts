@@ -73,6 +73,8 @@ export type Ledger = {
   /** The `[YYYY-MM-DD]` of the job's `line`-th line, counted from 0 as JobHistory counts them. */
   dateOf(kind: JobKind, id: string, line: number): string | null;
   failedCount(): number;
+  /** Every id with a line of `kind`, first seen first. */
+  ids(kind: JobKind): readonly string[];
 };
 
 export type LedgerWords = {
@@ -226,6 +228,7 @@ export function parseLedger(text: string): Ledger {
     lineCount: (kind, id) => byKey.get(`${kind}:${id}`)?.length ?? 0,
     dateOf: (kind, id, line) => byKey.get(`${kind}:${id}`)?.[line]?.date ?? null,
     failedCount: () => [...histories.values()].filter((h) => h.terminal?.kind === 'gave-up').length,
+    ids: (kind) => [...byKey.keys()].filter((k) => k.startsWith(`${kind}:`)).map((k) => k.slice(kind.length + 1)),
   };
 }
 

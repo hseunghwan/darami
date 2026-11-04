@@ -40,7 +40,14 @@ export type Text = {
     /** Sent when a turn ends with no tool call. */
     readonly nudge: string;
   };
-  chatRules(target: 'root' | 'domain'): string;
+  /** A chat's sections after the root or domain prompt. `domain` is null for a root chat. */
+  readonly chat: {
+    rules(domain: string | null): string;
+    /** The in-app tools: paths start at the wiki folder, and nothing can be written. */
+    workspace(domain: string | null): string;
+    /** The one turn after the limits, sent with no tools. */
+    readonly wrapUp: string;
+  };
 
   readonly index: { title(domain: string): string; readonly note: string; readonly other: string; readonly answers: string };
   /** _review.md's first line, written once when the engine creates the file. */

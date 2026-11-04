@@ -83,3 +83,6 @@ export type Fs = {
    */
   listTree(dir: WikiPath): Promise<readonly WikiPath[]>;
 };
+
+/** The Fs with no way to change a file: what a chat, the page viewer, and the save-time check read through. */
+export type ReadFs = Pick<Fs, 'readText' | 'list' | 'listTree'>;

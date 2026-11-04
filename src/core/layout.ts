@@ -8,7 +8,7 @@
  */
 
 import { CONFIG_FILE } from './config';
-import type { DomainName } from './types';
+import type { ChatTarget, DomainName } from './types';
 
 /**
  * A place in the wiki folder: relative to its root, `/`-separated, NFC, with no empty, `.`, or `..`
@@ -118,6 +118,42 @@ export function placeOf(domain: DomainName, declared: readonly DomainName[], pat
     (top === '_schema' && second !== undefined);
   return { kind: readable ? 'readable' : 'outside', path };
 }
+
+/**
+ * What a chat may read, for a path its model or a citation named. Chat paths start at the wiki
+ * folder for both targets (`스터디/wiki/RAG.md`, `CLAUDE.md`), so a page is read, listed in
+ * index.md, and cited by the same string.
+ *
+ *   readable  every declared domain's wiki/**, CLAUDE.md, dotoriwiki.yaml, _schema/**, and for a
+ *             domain chat its own <d>/CLAUDE.md
+ *   outside   anything else: raw/, hold/, inbox/ (answers included), _originals/, _attachments/,
+ *             another domain's CLAUDE.md, any dot segment, and what is not a path
+ *
+ * No kind is writable, so no caller can branch to a place a chat changes. The rules are chat's own,
+ * not placeOf's: what ingest may read can widen (photos) without widening chat.
+ */
+export type ChatPlace = { readonly kind: 'readable'; readonly path: WikiPath } | { readonly kind: 'outside'; readonly path: WikiPath | null };
+
+export function placeForChat(target: ChatTarget, declared: readonly DomainName[], named: string): ChatPlace {
+  const path = resolvePath(ROOT, named);
+  return path === null ? { kind: 'outside', path: null } : chatPlaceOf(target, declared, path);
+}
+
+/** placeForChat for a path already resolved, such as one listTree returned. */
+export function chatPlaceOf(target: ChatTarget, declared: readonly DomainName[], path: WikiPath): ChatPlace {
+  if (path === ROOT || path.split('/').some((s) => s.startsWith('.'))) return { kind: 'outside', path };
+  const [top, second, ...rest] = path.split('/');
+  const readable =
+    (declared.includes(top as DomainName) && second === 'wiki' && rest.length > 0) ||
+    path === paths.rootSchema ||
+    path === paths.config ||
+    (top === '_schema' && second !== undefined) ||
+    (target.kind === 'domain' && path === paths.domainSchema(target.domain));
+  return { kind: readable ? 'readable' : 'outside', path };
+}
+
+/** The folders a chat may list: each declared domain's wiki/, then _schema/. */
+export const chatRoots = (declared: readonly DomainName[]): readonly WikiPath[] => [...declared.map(paths.wiki), p('_schema')];
 
 /** `path` as the job's model names it: relative to the domain folder, `../` for another folder. */
 export const shownPath = (domain: DomainName, path: WikiPath): string => (path.startsWith(`${domain}/`) ? path.slice(domain.length + 1) : `../${path}`);

@@ -56,12 +56,20 @@ ${INGEST_VERDICTS.map((v) => `  - ${c(v)}: ${verdictMeaning[v]}`).join('\n')}`,
     nudge: '작업이 끝났으면 `finish`를 불러 판정을 돌려준다. 아직이면 도구로 계속한다.',
   },
 
-  chatRules: (target) => `## 채팅 규칙
+  chat: {
+    rules: (domain) => `## 채팅 규칙
 
 - 이 채팅은 위키를 읽기만 한다. 파일을 만들거나 고치지 않는다.
-- ${target === 'root' ? '각 도메인의 `wiki/index.md`를' : '`wiki/index.md`를'} 먼저 읽고 필요한 페이지만 연다.
+- ${domain === null ? '각 도메인의 `<도메인>/wiki/index.md`를' : `${c(`${domain}/wiki/index.md`)}를`} 먼저 읽고 필요한 페이지만 연다.
 - 답의 근거가 된 위키 페이지를 \`[[도메인/wiki/페이지]]\` 형식으로 단다.
 - 위키에 없는 내용은 없다고 말하고 지어내지 않는다.`,
+    workspace: (domain) => `## 작업 환경
+
+- 파일은 도구로만 본다. \`list\`, \`read\`, \`search\` 중 어느 것도 파일을 바꾸지 않는다.
+- 경로는 위키 폴더 기준이다. 페이지는 \`<도메인>/wiki/<이름>.md\`이고, \`[[<도메인>/wiki/<이름>]]\`으로 단다.${domain === null ? '' : ` 이 채팅은 ${c(domain)} 도메인에 묻는다. 페이지는 ${c(`${domain}/wiki/<이름>.md`)}다.`}
+- \`search\`는 \`wiki/index.md\`에 있는 페이지를 찾는다. 못 찾으면 색인의 경로로 페이지를 연다.`,
+    wrapUp: '이 질문에 쓸 도구를 다 썼다. 지금까지 읽은 것으로 바로 답한다. 다 읽기 전에 멈췄다는 것과 확인하지 못한 것을 밝힌다.',
+  },
 
   index: { title: (domain) => `# ${domain} 색인`, note: '서버가 페이지 frontmatter에서 만든다. 고치지 않는다.', other: '기타', answers: '저장된 답' },
   reviewTitle: '# 검토할 것',

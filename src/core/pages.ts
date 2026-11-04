@@ -310,6 +310,9 @@ export function renderIndex(domain: string, pages: readonly PageMeta[], typeOrde
 }
 
 
+/** What the inside of `[[…]]` names: before `|` and `#`, trimmed, `.md` dropped, NFC. '' names nothing. */
+export const linkTarget = (inner: string): string => inner.split('|')[0]!.split('#')[0]!.trim().replace(/\.md$/, '').normalize('NFC');
+
 /** `[[target]]`, `[[target|label]]`, `[[target#heading]]`, `![[embed]]` → target. Skips fenced code. */
 export function extractWikilinks(markdown: string): readonly string[] {
   const out: string[] = [];
@@ -319,9 +322,20 @@ export function extractWikilinks(markdown: string): readonly string[] {
     if (fenced) continue;
     // Obsidian doesn't link inside code spans, and articles quote syntax like `[[...]]` there.
     for (const m of line.replace(/(`+)[^`]*?\1/g, '').matchAll(/\[\[([^[\]\n]+?)\]\]/g)) {
-      const target = m[1]!.split('|')[0]!.split('#')[0]!.trim().replace(/\.md$/, '');
-      if (target) out.push(target.normalize('NFC'));
+      const target = linkTarget(m[1]!);
+      if (target) out.push(target);
     }
+  }
+  return out;
+}
+
+/** index.md's page lines as renderIndex writes them, `- [[d/wiki/p|p]] - summary`: the link's target and the summary. Other lines are skipped. */
+export function indexEntries(text: string): readonly { readonly target: string; readonly summary: string }[] {
+  const out: { target: string; summary: string }[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^- \[\[([^[\]\n]+?)\]\](?: - (.*))?$/.exec(line.trimEnd());
+    const target = m ? linkTarget(m[1]!) : '';
+    if (target) out.push({ target, summary: m![2] ?? '' });
   }
   return out;
 }
