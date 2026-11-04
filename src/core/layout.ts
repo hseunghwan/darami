@@ -169,14 +169,21 @@ export function memoDirOf(dir: WikiPath): MemoSpot | null {
   return sub === 'raw' || sub === 'hold' ? { kind: sub, domain } : null;
 }
 
-/** What a write to `path` changes for the memo screens: a name in a memo folder, or a domain's ledger. */
-export type Touched = { readonly kind: 'memo'; readonly dir: WikiPath; readonly name: string } | { readonly kind: 'ledger' };
+/** The domain segment of `inbox/answers/<d>`, as written; null for any other folder. */
+export function answerDirOf(dir: WikiPath): string | null {
+  const [inbox, answers, domain, ...rest] = dir.split('/');
+  return inbox === paths.inbox && answers === 'answers' && domain && !domain.startsWith('.') && rest.length === 0 ? domain : null;
+}
+
+/** What a write to `path` changes for the screens: a name in a memo folder or an answer staging folder, or a domain's ledger. */
+export type Touched = { readonly kind: 'memo' | 'answer'; readonly dir: WikiPath; readonly name: string } | { readonly kind: 'ledger' };
 
 export function touchedBy(path: WikiPath): Touched | null {
   const cut = path.lastIndexOf('/');
   if (cut < 0) return null;
   const dir = path.slice(0, cut) as WikiPath;
   if (memoDirOf(dir)) return { kind: 'memo', dir, name: path.slice(cut + 1) };
+  if (answerDirOf(dir) !== null) return { kind: 'answer', dir, name: path.slice(cut + 1) };
   const [domain, wiki, log, ...rest] = path.split('/');
   return domain && !domain.startsWith('.') && wiki === 'wiki' && log === 'log.md' && rest.length === 0 ? { kind: 'ledger' } : null;
 }

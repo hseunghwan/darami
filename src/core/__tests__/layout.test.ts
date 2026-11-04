@@ -83,5 +83,6 @@ test('memo folders are the inbox and each domain\'s raw/ and hold/, and a ledger
   assert.deepEqual(touchedBy(at('스터디/hold/a.md')), { kind: 'memo', dir: '스터디/hold', name: 'a.md' });
   assert.deepEqual(touchedBy(at('inbox/a.md')), { kind: 'memo', dir: 'inbox', name: 'a.md' });
   assert.deepEqual(touchedBy(at('스터디/wiki/log.md')), { kind: 'ledger' });
-  for (const not of ['스터디/wiki/index.md', '스터디/wiki/sub/log.md', 'inbox/answers/스터디/a.md', 'log.md', 'CLAUDE.md']) assert.equal(touchedBy(at(not)), null, not);
+  assert.deepEqual(touchedBy(at('inbox/answers/스터디/a.md')), { kind: 'answer', dir: 'inbox/answers/스터디', name: 'a.md' });
+  for (const not of ['스터디/wiki/index.md', '스터디/wiki/sub/log.md', 'inbox/answers/a.md', 'inbox/answers/스터디/x/a.md', 'inbox/answers/.x/a.md', 'log.md', 'CLAUDE.md']) assert.equal(touchedBy(at(not)), null, not);
 });

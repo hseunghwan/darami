@@ -24,11 +24,11 @@
 import type { ConfigParse } from '../core/config';
 import type { CommittedPage } from '../core/filing';
 import type { Fs } from '../core/fs';
-import { memoDirOf, parseWikiPath, paths, touchedBy, type WikiPath } from '../core/layout';
+import { answerDirOf, memoDirOf, parseWikiPath, paths, touchedBy, type WikiPath } from '../core/layout';
 import { parseLedger, type Ledger } from '../core/ledger';
 import { MEMO_SOURCES, pageMeta, parseMemoFile, parseMemoId, type Memo, type MemoSource, type Routing } from '../core/pages';
-import { locate, memoIds, memoIdsIn, orderKey, placementOf, type Located, type Placement, type Places } from '../core/places';
-import type { DomainName, MemoId } from '../core/types';
+import { answerIdsIn, answerPlacements, locate, memoIds, memoIdsIn, orderKey, placementOf, type AnswerPlacement, type Located, type Placement, type Places } from '../core/places';
+import type { AnswerId, DomainName, MemoId } from '../core/types';
 import type { JournalStore } from './transaction';
 
 export type MemoRow = {
@@ -59,6 +59,12 @@ export type MemoBook = {
   readonly counts: { readonly working: number; readonly confirm: number };
   /** A row keeps its identity across books while its placement and file are unchanged. */
   readonly byId: ReadonlyMap<MemoId, MemoRow>;
+  /**
+   * Saved chat answers, from each declared domain's staging names and ledger as last seen: `staged`
+   * the moment Save answer's create returns, `saved` the moment the job's applied line is written.
+   * Keeps its identity across books while no answer changed.
+   */
+  readonly answers: ReadonlyMap<AnswerId, AnswerPlacement>;
 };
 
 /** A page an ingest changed, under wiki/ without `.md`. `change` null: a commit darami did not record (dotoriwiki's, or before P4). */
@@ -189,6 +195,8 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
   let domains: readonly DomainName[] | null = null;
   const folders = new Map<string, Folder>();
   const ledgers = new Map<string, { readonly text: string; parsed: Ledger | null }>();
+  /** Each answer staging folder's names, as last listed or changed. */
+  const staging = new Map<string, ReadonlySet<string>>();
   let running: ReadonlyMap<DomainName, string> = new Map();
   const holdRouting = new Map<string, Routing | null>();
   /** Memos whose file did not read as the memo, by the placement it had then: not read again until that changes. */
@@ -205,6 +213,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
 
   let derived: Derived | null = null;
   let previous = new Map<MemoId, { readonly key: string; readonly header: MemoHeader; readonly row: MemoRow }>();
+  let answers: ReadonlyMap<AnswerId, AnswerPlacement> = new Map();
   const listeners = new Set<() => void>();
   let notifying = false;
   let backfilling = false;
@@ -250,6 +259,21 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
     setFolder(dir, names, was.whole);
   }
 
+  /** An answer staging folder never listed counts as empty, so its first listing changes nothing when it is. */
+  function setStaging(dir: string, names: ReadonlySet<string>): void {
+    const was = staging.get(dir) ?? new Set();
+    if (was.size === names.size && [...names].every((n) => was.has(n))) return;
+    staging.set(dir, names);
+    changed();
+  }
+
+  function setStaged(dir: string, name: string, present: boolean): void {
+    const names = new Set(staging.get(dir));
+    if (present) names.add(name);
+    else names.delete(name);
+    setStaging(dir, names);
+  }
+
   function setLedger(path: string, text: string): void {
     if (ledgers.get(path)?.text === text) return;
     ledgers.set(path, { text, parsed: null });
@@ -287,7 +311,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
   async function mutate<T>(path: WikiPath, op: () => Promise<T>, after: (r: T) => void): Promise<T> {
     const t = touchedBy(path);
     if (!t) return op();
-    const key = t.kind === 'memo' ? t.dir : path;
+    const key = t.kind === 'ledger' ? path : t.dir;
     mark(key);
     try {
       const r = await op();
@@ -313,6 +337,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
       setName(t.dir, t.name, true);
       sawMemoFile(t.dir, t.name, path, text, true);
     }
+    if (t?.kind === 'answer') setStaged(t.dir, t.name, true);
   }
 
   const fs: Fs = {
@@ -329,6 +354,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
         setFolder(dir, new Set(names), true);
         readIn.set(dir, passes);
       }
+      if (answerDirOf(dir) !== null && unchangedSince(dir, start)) setStaging(dir, new Set(names));
       return names;
     },
     create: (path, text) =>
@@ -336,6 +362,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
         if (r === 'created') return wrote(path, text);
         const t = touchedBy(path);
         if (t?.kind === 'memo') setName(t.dir, t.name, true);
+        if (t?.kind === 'answer') setStaged(t.dir, t.name, true);
       }),
     write: (path, text) => mutate(path, () => inner.write(path, text), () => wrote(path, text)),
     remove: (path) =>
@@ -349,6 +376,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
           setName(t.dir, t.name, false);
           if (holdRouting.delete(path)) changed();
         }
+        if (t?.kind === 'answer') setStaged(t.dir, t.name, false);
       }),
     listTree: (dir) => inner.listTree(dir),
   };
@@ -398,6 +426,15 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
     };
   }
 
+  /** The answers now, as the same map while nothing in it changed. */
+  function answersNow(): ReadonlyMap<AnswerId, AnswerPlacement> {
+    const staged = (d: DomainName) => answerIdsIn(staging.get(paths.answersInbox(d)) ?? []);
+    const next = answerPlacements((domains ?? []).map((d) => ({ domain: d, staged: staged(d), ledger: ledgerOf(paths.log(d)) })));
+    const same = next.size === answers.size && [...next].every(([id, a]) => JSON.stringify(answers.get(id)) === JSON.stringify(a));
+    if (!same) answers = next;
+    return answers;
+  }
+
   function derive(): Derived {
     if (derived) return derived;
     const p = places();
@@ -445,6 +482,7 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
       failed: rows.filter((r): r is FailedRow => r.at.state === 'failed'),
       counts: { working, confirm },
       byId: new Map(rows.map((r) => [r.id, r])),
+      answers: answersNow(),
     };
     derived = { book, placements, unread: unread.sort(backfillOrder) };
     return derived;

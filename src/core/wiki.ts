@@ -117,7 +117,7 @@ export async function setUpWiki(fs: Fs, setUp: SetUp): Promise<FolderState> {
 }
 
 /** <d>/wiki/log.md parsed; a missing file is an empty ledger. */
-export async function readLedger(fs: Fs, d: DomainName): Promise<Ledger> {
+export async function readLedger(fs: Pick<Fs, 'readText'>, d: DomainName): Promise<Ledger> {
   return parseLedger((await fs.readText(paths.log(d))) ?? '');
 }
 
