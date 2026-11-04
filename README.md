@@ -84,6 +84,14 @@ The **Ask** tab answers questions from your wiki. Pick **All** to ask across eve
 
 Chats stay on the phone, outside the wiki folder. The history button opens **Past chats**, and the plus button starts a new chat. A question that needs more than 10 model turns or 3 minutes stops and asks for a narrower question.
 
+## Pick the models
+
+Settings has a **Model** section with two rows. **Filing** sorts memos and writes the pages. **Ask** answers your questions. Each row shows the model and effort in use, such as `gpt-6-sol · high`, or **Default (gpt-6-luna)**.
+
+Tap a row to change it. The sheet lists **Default (gpt-6-luna)** and the models your ChatGPT plan offers. Pick a model, then its effort. When ChatGPT names the efforts a model takes, the sheet offers only those, and a saved effort the model no longer takes runs at the model's default. Higher effort takes longer and uses more of your plan's limit. **Default** puts the row back on `gpt-6-luna`, with low effort to sort memos and to answer, and medium to file.
+
+darami asks ChatGPT for the list each time Settings opens and keeps the last one, so the sheet works offline. A pick applies from the next model call. When the account cannot use the model, the badge reads `ChatGPT isn't answering` and darami tries again in 10 minutes, or at once when you pick another model. The **Filing** pick wins over a `model_profile` in `dotoriwiki.yaml`.
+
 ## The wiki folder
 
 ```
@@ -143,7 +151,7 @@ darami copies the wiki folder nowhere, so the folder and the photo originals in 
 - Only folders on the phone's own storage work. SD cards were not tested.
 - Filing runs only while darami is open on screen.
 - YouTube links are not transcribed. There are no feeds.
-- Every job runs on `gpt-6-luna`. The classifier and Ask use low effort, and filing uses medium. No setting changes it, and the account must be able to use that model. A `model_profile` other than `default` in `dotoriwiki.yaml` gets a warning and runs on the default. In the checks so far, `gpt-6-luna` filed three short memos as **Nothing to file**.
+- Every job runs on `gpt-6-luna` until you pick other models in Settings, as [Pick the models](#pick-the-models) describes. Only `gpt-6-luna` was timed on the phone. A `model_profile` other than `default` in `dotoriwiki.yaml` gets a warning and changes nothing. In the checks so far, `gpt-6-luna` at medium effort filed three short memos as **Nothing to file**.
 - A usage limit pauses filing until the time ChatGPT gives, or for five minutes when it gives none. That path has not met a real limit yet.
 - A large wiki is slow. Every read goes through Android's storage framework, and search reads every page.
 

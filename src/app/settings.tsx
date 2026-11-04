@@ -3,8 +3,9 @@ import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, type ReactNode } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { DEFAULT_MODEL, settleChoice, type ModelChoice } from '../agent/model';
 import { filingStatus, statusLine } from '../lib/status';
-import { fileNow, logOut, recheckFolder, updateSettings, useApp, type Folder, type ThemePref } from '../state';
+import { fileNow, loadModels, logOut, recheckFolder, updateSettings, useApp, type Folder, type ThemePref } from '../state';
 import { useNow } from '../ui/hooks';
 import { Card, Header, Screen, SectionTitle, SmallButton } from '../ui/parts';
 import { useTheme } from '../ui/theme';
@@ -88,6 +89,42 @@ function ChatGptSection() {
   );
 }
 
+function ModelSection() {
+  const t = useTheme();
+  const choice = useApp((a) => a.models);
+  const list = useApp((a) => a.modelList.list);
+  const inUse = settleChoice(choice, list);
+  const roles: { role: keyof ModelChoice; label: string }[] = [
+    { role: 'filing', label: copy.models.filing },
+    { role: 'ask', label: copy.models.ask },
+  ];
+  return (
+    <View style={st.section}>
+      <SectionTitle style={st.h2}>{copy.models.title}</SectionTitle>
+      <Card>
+        {roles.map(({ role, label }, i) => {
+          const pick = inUse[role];
+          const value = pick ? copy.models.picked(pick.model, pick.effort) : copy.models.default(DEFAULT_MODEL);
+          return (
+            <Pressable
+              key={role}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityValue={{ text: value }}
+              onPress={() => router.push({ pathname: '/model/[role]', params: { role } })}
+            >
+              <Row label={label} last={i === roles.length - 1}>
+                <Text numberOfLines={1} style={{ flexShrink: 1, color: t.muted, fontSize: 14 }}>{value}</Text>
+              </Row>
+            </Pressable>
+          );
+        })}
+      </Card>
+      <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18, marginHorizontal: 4 }}>{copy.models.note}</Text>
+    </View>
+  );
+}
+
 function FilingSection() {
   const t = useTheme();
   const now = useNow();
@@ -122,6 +159,7 @@ export default function Settings() {
   useFocusEffect(
     useCallback(() => {
       void recheckFolder();
+      void loadModels();
     }, []),
   );
 
@@ -158,6 +196,8 @@ export default function Settings() {
         </View>
 
         <ChatGptSection />
+
+        <ModelSection />
 
         <View style={st.section}>
           <SectionTitle style={st.h2}>{copy.common.memo}</SectionTitle>
