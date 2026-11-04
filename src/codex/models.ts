@@ -56,11 +56,14 @@ export type ModelListResult =
   | { readonly ok: true; readonly models: readonly ListedModel[] }
   | { readonly ok: false; readonly failure: ModelFailure | { readonly kind: 'shape'; readonly detail: string } };
 
+/** The endpoint refuses a request without it (422, measured on the emulator). The value is the Codex CLI version darami was checked against. */
+export const CLIENT_VERSION = '0.165.0';
+
 export async function listModels(fetchFn: Fetch, creds: Credentials, baseUrl = CODEX_BASE_URL): Promise<ModelListResult> {
   let res: Response;
   let text: string;
   try {
-    res = await fetchFn(`${baseUrl}/models`, { method: 'GET', headers: { ...headers(creds), accept: 'application/json' } });
+    res = await fetchFn(`${baseUrl}/models?client_version=${CLIENT_VERSION}`, { method: 'GET', headers: { ...headers(creds), accept: 'application/json' } });
     text = await res.text();
   } catch (e) {
     return { ok: false, failure: { kind: 'network', detail: e instanceof Error ? e.message : String(e) } };
