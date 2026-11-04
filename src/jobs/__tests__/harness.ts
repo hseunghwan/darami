@@ -13,6 +13,7 @@ import { MODEL_PROFILES } from '../../agent/model';
 import type { Located } from '../../core/places';
 import type { MemoId } from '../../core/types';
 import type { BookStore, CommitRecord, MemoBook, MemoHeader } from '../book';
+import type { ChatRow, ChatStore, TurnRecord } from '../chat';
 import { openEngine, type Engine, type EngineEvent } from '../engine';
 import type { JournalHead, JournalJob, JournalStore, Slot } from '../transaction';
 
@@ -240,6 +241,35 @@ export function memoryBook(): BookStore {
     },
     async putCommit(r) {
       commits.set(`${r.domain}\0${r.id}`, r);
+    },
+  };
+}
+
+/** The ChatStore in memory, with sqliteChats' order. One object outlives a reopen, as the database does. */
+export function memoryChats(): ChatStore {
+  const turns = new Map<string, TurnRecord[]>();
+  return {
+    async chats() {
+      const rows: ChatRow[] = [...turns.values()].map((ts) => ({
+        chat: ts[0]!.chat,
+        target: ts[0]!.target,
+        createdAt: ts.map((t) => t.askedAt).sort()[0]!,
+        updatedAt: ts.map((t) => t.at).sort().at(-1)!,
+        turns: ts.length,
+        first: ts[0]!.question,
+      }));
+      return rows.sort((a, b) => (a.updatedAt !== b.updatedAt ? (a.updatedAt < b.updatedAt ? 1 : -1) : a.chat < b.chat ? 1 : -1));
+    },
+    async turns(chat) {
+      return [...(turns.get(chat) ?? [])];
+    },
+    async add(t) {
+      const ts = turns.get(t.chat) ?? [];
+      if (ts.some((x) => x.n === t.n)) throw new Error(`chat turn ${t.chat} ${t.n} exists`);
+      turns.set(t.chat, [...ts, t].sort((a, b) => a.n - b.n));
+    },
+    async remove(chat) {
+      turns.delete(chat);
     },
   };
 }

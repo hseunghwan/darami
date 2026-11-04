@@ -1,14 +1,15 @@
 /**
- * The JournalStore and the BookStore on SQLite: lib/db.ts's expo-sqlite database on the phone,
- * node:sqlite under jest, the same SQL on both.
+ * The JournalStore, the BookStore, and the ChatStore on SQLite: lib/db.ts's expo-sqlite database
+ * on the phone, node:sqlite under jest, the same SQL on both.
  *
- * SQLite holds the journal and the memo book's facts that never change once written, and nothing
- * else of the engine: memo state and attempts are the folder and its ledgers, and pauses are
- * timing. Each method is one statement, so each is atomic without a transaction that another
+ * SQLite holds the journal, the memo book's facts that never change once written, and the chats,
+ * which live only on the phone. Nothing else of the engine: memo state and attempts are the folder
+ * and its ledgers, and pauses are timing. Each method is one statement, so each is atomic without a transaction that another
  * domain's write could land inside; end() relies on ON DELETE CASCADE. Rows of a folder that is no
  * longer kept stay until it is kept again.
  */
 
+import { parseChatId } from '../core/chat';
 import type { CommittedPage } from '../core/filing';
 import { parseWikiPath, type WikiPath } from '../core/layout';
 import type { JobKind } from '../core/ledger';
@@ -16,6 +17,7 @@ import { parseMemoId } from '../core/pages';
 import type { DomainName } from '../core/types';
 import { db as appDb } from '../lib/db';
 import { parseHeader, type BookStore, type CommitRecord, type MemoHeader } from './book';
+import { CHAT_FAILURES, type ChatRow, type ChatStore, type TurnRecord } from './chat';
 import type { JournalHead, JournalStore } from './transaction';
 
 /** What the store needs of a database: expo-sqlite's SQLiteDatabase has it. */
@@ -198,6 +200,81 @@ export function sqliteBook(folder: string, open: () => Promise<Sql> = appDb): Bo
         'INSERT OR REPLACE INTO memo_commit (folder, domain, id, finished_at, pages) VALUES (?, ?, ?, ?, ?)',
         folder, r.domain, r.id, r.at, JSON.stringify(r.pages),
       );
+    },
+  };
+}
+
+/** A chat is its turns, so there is no chat row to keep in step and none a crash can leave empty. */
+const CHAT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS chat_turn (
+    folder TEXT NOT NULL,
+    chat TEXT NOT NULL,
+    n INTEGER NOT NULL CHECK (n >= 0),
+    target TEXT,
+    asked_at TEXT NOT NULL,
+    at TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT,
+    cited TEXT,
+    failure TEXT,
+    PRIMARY KEY (folder, chat, n),
+    CHECK ((answer IS NOT NULL AND cited IS NOT NULL AND failure IS NULL) OR (answer IS NULL AND cited IS NULL AND failure IS NOT NULL))
+  );
+`;
+
+type TurnRow = { chat: string; n: number; target: string | null; asked_at: string; at: string; question: string; answer: string | null; cited: string | null; failure: string | null };
+type ChatListRow = { chat: string; target: string | null; created_at: string; updated_at: string; turns: number; first: string };
+
+function citedOf(json: string): readonly string[] {
+  try {
+    const v: unknown = JSON.parse(json);
+    return Array.isArray(v) && v.every((c) => typeof c === 'string') ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function turnOf(r: TurnRow): TurnRecord | null {
+  const chat = parseChatId(r.chat);
+  if (!chat) return null;
+  const outcome: TurnRecord['outcome'] =
+    r.answer !== null ? { kind: 'answered', answer: r.answer, cited: citedOf(r.cited ?? '[]') } : { kind: 'failed', failure: CHAT_FAILURES.find((f) => f === r.failure) ?? 'other' };
+  return { chat, n: r.n, target: r.target, askedAt: r.asked_at, at: r.at, question: r.question, outcome };
+}
+
+/** Times are toISOString(), so text order is time order. */
+export function sqliteChats(folder: string, open: () => Promise<Sql> = appDb): ChatStore {
+  const db = opener(open, CHAT_SCHEMA);
+  return {
+    async chats() {
+      const rows = await (await db()).getAllAsync<ChatListRow>(
+        `SELECT chat, target, MIN(asked_at) AS created_at, MAX(at) AS updated_at, COUNT(*) AS turns,
+           (SELECT question FROM chat_turn f WHERE f.folder = t.folder AND f.chat = t.chat ORDER BY n LIMIT 1) AS first
+         FROM chat_turn t WHERE folder = ? GROUP BY chat ORDER BY updated_at DESC, chat DESC`,
+        folder,
+      );
+      return rows.flatMap((r): ChatRow[] => {
+        const chat = parseChatId(r.chat);
+        return chat ? [{ chat, target: r.target, createdAt: r.created_at, updatedAt: r.updated_at, turns: r.turns, first: r.first }] : [];
+      });
+    },
+    async turns(chat) {
+      const rows = await (await db()).getAllAsync<TurnRow>(
+        'SELECT chat, n, target, asked_at, at, question, answer, cited, failure FROM chat_turn WHERE folder = ? AND chat = ? ORDER BY n',
+        folder, chat,
+      );
+      return rows.flatMap((r) => turnOf(r) ?? []);
+    },
+    async add(t) {
+      const o = t.outcome;
+      await (await db()).runAsync(
+        'INSERT INTO chat_turn (folder, chat, n, target, asked_at, at, question, answer, cited, failure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        folder, t.chat, t.n, t.target, t.askedAt, t.at, t.question,
+        o.kind === 'answered' ? o.answer : null, o.kind === 'answered' ? JSON.stringify(o.cited) : null, o.kind === 'failed' ? o.failure : null,
+      );
+    },
+    async remove(chat) {
+      await (await db()).runAsync('DELETE FROM chat_turn WHERE folder = ? AND chat = ?', folder, chat);
     },
   };
 }
