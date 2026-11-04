@@ -31,8 +31,8 @@ const memoOf = (req: ModelRequest) => /raw\/([0-9A-Z]{26})\.md/.exec(JSON.string
 
 test('replaying dotoriwiki\'s scenario leaves made-by-dotoriwiki, byte for byte', async () => {
   const root = await presetWiki('ko');
-  const yaml = readFileSync(join(root, 'dotoriwiki.yaml'), 'utf8');
-  writeFileSync(join(root, 'dotoriwiki.yaml'), `${yaml.replace('    agents_may_read: true\n', '    agents_may_read: true\n    model_profile: strong\n')}feeds:\n  geeknews: { domain: 스터디 }\n`);
+  // dotoriwiki's own config, with its comments: darami never writes this file after the preset.
+  writeFileSync(join(root, 'dotoriwiki.yaml'), readFileSync(join(FIXTURE, 'dotoriwiki.yaml')));
 
   let tries6 = 0;
   const model = fakeModel({

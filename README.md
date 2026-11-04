@@ -110,7 +110,7 @@ darami writes the memo files, the photo files, `index.md`, and `log.md`. The mod
 
 Open the folder as an Obsidian vault and edit any page. darami reads pages from the folder for every job and every question, so it works from your edits. If a page changes while a job is working on it, the model has to read the page again before it can write it. Keep each page's frontmatter (`type`, `summary`, `aliases`, `status`, `sources`, `updated`), because `index.md` is built from it.
 
-To change the domains or page types, edit `dotoriwiki.yaml`. darami reads it on every pass, so a saved change applies without a restart. To add a domain, add an entry under `domains` and make a folder of the same name with a `CLAUDE.md` that says what the domain is for. A mistake in the file pauses filing while memos keep arriving. **Change folder** in Settings lists each problem with its fix, and **Check again** reads the file again. The comments in the starter `dotoriwiki.yaml` come from dotoriwiki and still mention its gateway.
+To change the domains or page types, edit `dotoriwiki.yaml`. darami reads it on every pass, so a saved change applies without a restart. To add a domain, add an entry under `domains` and make a folder of the same name with a `CLAUDE.md` that says what the domain is for. A mistake in the file pauses filing while memos keep arriving. **Change folder** in Settings lists each problem with its fix, and **Check again** reads the file again.
 
 ### Sync with Syncthing
 

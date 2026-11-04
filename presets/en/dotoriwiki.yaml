@@ -1,13 +1,14 @@
-# This wiki's settings. The gateway reads this file on every request, so a saved change
-# applies without a restart. A mistake pauses routing and ingest until it is fixed; memos
-# sent in the meantime wait in inbox/, and GET /status names each key to fix.
-# Settings for the machine the gateway runs on (token, port, programs, models) are not here.
+# This wiki's settings. darami reads this file whenever it needs them, so a saved change
+# applies without a restart. A mistake pauses filing until you fix it. Memos you send in the
+# meantime wait in inbox/. The app shows the problem in Settings, in the folder step, and as a
+# badge on the Memo tab.
+# The model is not set here. Pick it in the app's Settings.
 version: 1
 
-# Language of the server's own prompts and generated pages: en or ko.
+# Language of the prompts darami sends and the pages it writes: en or ko.
 locale: en
 
-# Time zone for the dates the wiki writes: ledger lines, `updated`, collected memos.
+# Time zone for the dates the wiki writes, such as ledger lines and `updated`.
 time_zone: America/Chicago
 
 # Where a memo goes when the classifier cannot pick a domain. It waits there for you to confirm.
@@ -15,8 +16,8 @@ fallback_domain: journal
 
 # One entry per domain. The key is the folder name, and that folder's CLAUDE.md tells the
 # model what the domain is for. `description` is what the classifier routes by.
-# `agents_may_read: true` marks a domain coding agents may read.
-# `model_profile: <name>` edits the domain with models.json's `edit.<name>` instead of `edit.default`.
+# `agents_may_read` comes from dotoriwiki. darami checks it but does not use it.
+# `model_profile` comes from dotoriwiki. darami checks it but does not use it.
 domains:
   journal:
     description: My days, the people in them, and what I make of it all
@@ -53,7 +54,4 @@ domains:
         description: A thought that is not a task yet. Related memos gather here
         example: ideas/Budget app.md
 
-# News collected as memos into a domain every three hours. A feed not listed is off.
-# feeds:
-#   hackernews: { domain: learning }
-#   ghsa: { domain: learning }
+# `feeds` comes from dotoriwiki. darami checks it but collects no news.
