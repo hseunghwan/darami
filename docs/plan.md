@@ -150,6 +150,27 @@ Checked on 2026-11-04 on the Android 16 emulator, after `pm clear`, with the dev
 - On a Windows checkout, `npm ci` fails with EPERM while an old Metro's `dotslash.exe` still runs. Stop it first.
 - Removing `expo-camera` needs a new native build for the APK. The installed dev client ran the new JavaScript without one.
 
+## What P5 found
+
+Checked on 2026-11-04 on the Android 16 emulator, in the kept folder `p4`, with the ChatGPT login from P4.
+
+- A root chat asked "What did I learn about SQLite WAL mode?". The answer matched the page and cited `learning/wiki/SQLite WAL mode`. The `CHAT` log line read `turns=3 tools=read,read ms=6331 first=5316 wrapped=no`.
+- The md5 of every file in the folder was the same before and after the chat (26 files, no difference). That is the first half of Done when 4.
+- Tapping the citation chip opened the read-only page viewer on that page.
+- Save answer changed exactly three files:
+  - it added `learning/wiki/answers/2026-11-04 What did I learn about SQLite WAL mode.md`
+  - it updated `index.md`
+  - it added the ledger line `file-answer | 6f3cdc2c-…-000000000000 | saved | answers/…md`
+
+  The staging file was removed after the commit. The answer page has dotoriwiki's frontmatter order and the `## Cited pages` section.
+- Chat cannot write by construction. It gets a reader and the journal's committed view, and neither has a write method. `boundary.test.ts` fails if `jobs/chat.ts` calls a writer. A jest test with a fake model tries every escape and checks that the folder stays byte for byte the same.
+- Chat reads pages as of the last commit, through the journal's before-images. It never waits for an ingest, and it never sees a half-written page.
+- Search starts from each `index.md` and is capped per question: 10 turns, 3 minutes, 60 reads, and 24 page bodies per search. One question took 6 s. The caps are still guesses for larger wikis.
+- A dev-build pitfall: when the LogBox banner covers a tab, the tap misses. Typed text then lands in the memo tab and is filed as a memo. Clear the banner before switching tabs from adb.
+- Open questions:
+  - The wrap-up turn sends `tools: []` while its input still holds function calls. It has not run against the endpoint, because no question ran out of turns.
+  - A preamble in a tool turn can flash before the "Reading the wiki" note.
+
 ## Shape
 
 ```
