@@ -47,6 +47,16 @@ const ARGS: Record<string, unknown[][]> = {
   'detail.confirm': [['learning']],
   'settings.loginExpired': [['me@example.com'], [null]],
   'settings.waiting': [[1], [3]],
+  'chat.askDomain': [['learning']],
+  'chat.readingPages': [['RAG, index']],
+  'chat.rememberedIn': [['learning']],
+  'chat.staging': [['learning']],
+  'chat.saveRefused.missing-page': [['RAG']],
+  'chat.limited': [[DAY]],
+  'chats.turns': [[1], [3]],
+  'chats.remove': [['What did I note about RAG?']],
+  'page.updated': [['2026-10-29']],
+  'page.photo': [['A-1.jpg']],
 };
 
 /** Every entry as [path, kind], walking objects and arrays. */
