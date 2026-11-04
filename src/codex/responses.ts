@@ -12,7 +12,8 @@ import type { Fetch } from './auth';
 export const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const ORIGINATOR = 'darami';
 
-export type Effort = 'minimal' | 'low' | 'medium' | 'high';
+export const EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
+export type Effort = (typeof EFFORTS)[number];
 
 export type FunctionTool = {
   readonly type: 'function';

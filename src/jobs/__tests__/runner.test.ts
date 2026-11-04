@@ -73,8 +73,8 @@ test('unavailable pauses every model job for as long as it says, while jobs with
   assert.ok(e.calls.slice(-2).some((c) => c.what === 'run' && c.withModel), 'the model runs once the pause is over');
 });
 
-test('a login pause ends when the user logs in, and a network pause when the network is back', async () => {
-  for (const [cause, end] of [['login', 'loggedIn'], ['network', 'networkBack']] as const) {
+test('a login pause ends when the user logs in, a network pause when the network is back, and a model pause when the user picks a model', async () => {
+  for (const [cause, end] of [['login', 'loggedIn'], ['network', 'networkBack'], ['model', 'modelPicked']] as const) {
     const e = scripted([], { [A]: [{ kind: 'unavailable', job: job(A), unavailable: unavailable(cause, 600_000) }] });
     const h = runnerOn(e.engine);
     await h.runner.trigger();
@@ -159,8 +159,8 @@ test('a pause that runs out shows as over after the pass its timer wakes, with n
   assert.equal(h.reports.length, 1, 'the idle pass reported nothing');
 });
 
-test('a login or the network back ends its pause for the app before the pass it starts', async () => {
-  for (const [cause, end] of [['login', 'loggedIn'], ['network', 'networkBack']] as const) {
+test('a login, the network back, or a model pick ends its pause for the app before the pass it starts', async () => {
+  for (const [cause, end] of [['login', 'loggedIn'], ['network', 'networkBack'], ['model', 'modelPicked']] as const) {
     const e = scripted([{ kind: 'unavailable', unavailable: unavailable(cause, 600_000) }], {});
     const h = runnerOn(e.engine);
     await h.runner.trigger();

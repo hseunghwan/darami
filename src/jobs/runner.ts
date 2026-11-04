@@ -16,7 +16,7 @@ import { FolderUnreachable } from '../core/fs';
 import type { DomainName } from '../core/types';
 import { createFlusher, type FlushResult } from '../lib/flusher';
 import type { Engine, RouteReport, RunReport } from './engine';
-import { afterLogin, afterNetwork, afterRoute, afterRun, expire, modelAllowed, rotation, START, wakeIn, type Schedule } from './schedule';
+import { afterLogin, afterModelPick, afterNetwork, afterRoute, afterRun, expire, modelAllowed, rotation, START, wakeIn, type Schedule } from './schedule';
 
 /** Model work waits until `until`. */
 export type Pause = NonNullable<Schedule['pause']>;
@@ -33,6 +33,8 @@ export type Runner = {
   loggedIn(): Promise<void>;
   /** Ends a network or server pause and runs. */
   networkBack(): Promise<void>;
+  /** Ends a pause for a refused model and runs. */
+  modelPicked(): Promise<void>;
   /** After an unreachable folder answers again. */
   resume(): Promise<void>;
   /** Leaving the foreground cancels the running job, which rolls back with no line and no attempt spent. */
@@ -111,6 +113,11 @@ export function createRunner(deps: RunnerDeps): Runner {
     },
     networkBack() {
       s = afterNetwork(s);
+      deps.onSettled();
+      return flusher.trigger();
+    },
+    modelPicked() {
+      s = afterModelPick(s);
       deps.onSettled();
       return flusher.trigger();
     },

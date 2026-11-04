@@ -52,6 +52,9 @@ export const afterLogin = (s: Schedule): Schedule => (s.pause?.cause === 'login'
 /** The network came back: a network or server pause ends now. */
 export const afterNetwork = (s: Schedule): Schedule => (s.pause?.cause === 'network' || s.pause?.cause === 'server' ? { ...s, pause: null } : s);
 
+/** The user picked another model: a pause for a model the endpoint refused ends now. */
+export const afterModelPick = (s: Schedule): Schedule => (s.pause?.cause === 'model' ? { ...s, pause: null } : s);
+
 /** ms until the earliest pause or backoff still ahead ends, or null when nothing waits on time. */
 export function wakeIn(s: Schedule, now: number): number | null {
   const ahead = [s.pause?.until ?? 0, ...s.backoff.values()].filter((t) => t > now);
