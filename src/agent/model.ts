@@ -8,6 +8,7 @@
  */
 
 import { EFFORTS, type Credentials, type Effort, type FunctionTool, type InputItem, type ModelFailure, type OutputItem, type TurnRequest, type TurnResult } from '../codex/responses';
+import type { ListedModel } from '../codex/models';
 import type { ModelProfile } from '../core/config';
 import { classifySchema, parseClassification, type Classification } from '../core/filing';
 import type { DomainName } from '../core/types';
@@ -101,6 +102,20 @@ export function parseModelChoice(text: string | null): ModelChoice {
     return NO_CHOICE;
   }
 }
+
+/** The choice with each effort the listed model no longer offers replaced by its default. A model the list lacks is kept: the endpoint has the last word. */
+export function settleChoice(choice: ModelChoice, list: readonly ListedModel[] | null): ModelChoice {
+  const settle = (pick: RoleModel | null): RoleModel | null => {
+    const listed = pick && list?.find((m) => m.slug === pick.model);
+    if (!pick || !listed?.efforts || listed.efforts.includes(pick.effort)) return pick;
+    const effort = listed.defaultEffort && listed.efforts.includes(listed.defaultEffort) ? listed.defaultEffort : listed.efforts[0];
+    return effort ? { model: pick.model, effort } : pick;
+  };
+  return { filing: settle(choice.filing), ask: settle(choice.ask) };
+}
+
+/** The efforts the sheet offers for a model: what the list names, else all of them. */
+export const effortsFor = (m: ListedModel | undefined): readonly Effort[] => m?.efforts ?? EFFORTS;
 
 const MINUTE = 60_000;
 /** A turn whose stream sends nothing for this long is a stalled server, not a bad job. */
