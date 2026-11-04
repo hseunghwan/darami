@@ -5,7 +5,7 @@
  */
 
 import './navigator';
-// exifr's full bundle with its import() of Node's fs removed, which Hermes cannot parse (scripts/vendor-exifr.ts).
+// exifr's full bundle without its loader of Node modules, which Hermes and Metro refuse (scripts/vendor-exifr.ts).
 import exifr from './vendor/exifr';
 import type { ExifTags } from '../core/photos';
 
