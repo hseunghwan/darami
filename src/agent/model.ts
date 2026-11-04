@@ -12,7 +12,7 @@ import type { ModelProfile } from '../core/config';
 import { classifySchema, parseClassification, type Classification } from '../core/filing';
 import type { DomainName } from '../core/types';
 
-export type ModelRole = 'classify' | 'ingest';
+export type ModelRole = 'classify' | 'ingest' | 'chat';
 
 export type ModelRequest = {
   readonly role: ModelRole;
@@ -22,6 +22,8 @@ export type ModelRequest = {
   readonly input: readonly InputItem[];
   readonly tools?: readonly FunctionTool[];
   readonly schema?: { readonly name: string; readonly schema: Record<string, unknown> };
+  /** Each text delta of the turn as it streams. Tool-calling turns send them too. */
+  readonly onText?: (delta: string) => void;
 };
 
 /**
@@ -54,18 +56,21 @@ export type ModelChoice = { readonly model: string; readonly effort: Effort };
 /**
  * Only gpt-6-luna was measured on the phone (classify 3.3 s at low effort, a tool turn 1.5 s).
  * `ingest` is keyed by model_profile, and MODEL_PROFILES is its key set, so a profile added here
- * stops warning with no second list to edit.
+ * stops warning with no second list to edit. Chat ignores model_profile, as dotoriwiki's did, and
+ * runs at low effort because someone is waiting for the first word.
  */
 export const MODELS = {
   classify: { model: 'gpt-6-luna', effort: 'low' },
+  chat: { model: 'gpt-6-luna', effort: 'low' },
   ingest: { default: { model: 'gpt-6-luna', effort: 'medium' } },
-} as const satisfies { readonly classify: ModelChoice; readonly ingest: { readonly default: ModelChoice } };
+} as const satisfies { readonly classify: ModelChoice; readonly chat: ModelChoice; readonly ingest: { readonly default: ModelChoice } };
 
 export const MODEL_PROFILES: ReadonlySet<string> = new Set(Object.keys(MODELS.ingest));
 
 export function choiceFor(role: ModelRole, profile: ModelProfile | null): ModelChoice {
   const ingest: Readonly<Record<string, ModelChoice>> = MODELS.ingest;
-  return role === 'classify' ? MODELS.classify : (profile && ingest[profile]) || MODELS.ingest.default;
+  if (role === 'classify' || role === 'chat') return MODELS[role];
+  return (profile && ingest[profile]) || MODELS.ingest.default;
 }
 
 const MINUTE = 60_000;
@@ -126,7 +131,7 @@ export function codexModel(deps: CodexDeps): Model {
       if (signal.aborted) abort.abort();
       arm();
       try {
-        const r = await deps.runTurn(creds, { ...choice, instructions: req.instructions, input: req.input, tools: req.tools, schema: req.schema, signal: abort.signal, onChunk: arm });
+        const r = await deps.runTurn(creds, { ...choice, instructions: req.instructions, input: req.input, tools: req.tools, schema: req.schema, signal: abort.signal, onText: req.onText, onChunk: arm });
         return { r, stalled };
       } finally {
         cancel();

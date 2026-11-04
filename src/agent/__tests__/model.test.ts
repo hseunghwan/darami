@@ -33,6 +33,15 @@ test('the model choices are constants: luna at low effort to classify, at medium
   assert.deepEqual(choiceFor('ingest', null), { model: 'gpt-6-luna', effort: 'medium' });
   assert.deepEqual(choiceFor('ingest', 'strong' as ModelProfile), MODELS.ingest.default);
   assert.deepEqual([...MODEL_PROFILES], ['default']);
+  assert.deepEqual(choiceFor('chat', 'strong' as ModelProfile), { model: 'gpt-6-luna', effort: 'low' }, 'chat ignores model_profile');
+});
+
+test("a chat turn's text deltas reach the caller as the stream sends them", async () => {
+  const seen: string[] = [];
+  const h = harness({ turns: [(r) => (r.onText?.('a'), r.onText?.('b'), ok)] });
+  await h.model({ ...req, role: 'chat', onText: (d) => seen.push(d) }, new AbortController().signal);
+  assert.deepEqual(seen, ['a', 'b']);
+  assert.equal(h.sent[0]!.req.effort, 'low');
 });
 
 test('a turn goes out with the role\'s model and effort, and the request as given', async () => {
