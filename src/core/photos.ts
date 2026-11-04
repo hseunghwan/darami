@@ -158,6 +158,51 @@ export function attachmentOf(a: {
   };
 }
 
+/** A re-encode the PhotoTools port makes: the long edge at most maxEdge, never enlarged, JPEG at quality. */
+export type JpegSpec = { readonly maxEdge: number; readonly quality: number };
+
+/** _attachments/<id>-<n>.jpg: dotoriwiki's `sips -Z 2048` at formatOptions 82. */
+export const COPY_JPEG: JpegSpec = { maxEdge: 2048, quality: 0.82 };
+/**
+ * What the model sees, made from the copy at each ingest attempt and never stored. The endpoint's
+ * high-detail path scales a photo's short side to 768, which is what it keeps of a 4:3 photo at 1024.
+ */
+export const MODEL_JPEG: JpegSpec = { maxEdge: 1024, quality: 0.7 };
+
+/** The engine's port to the phone's hashing and image code. Bound by src/media/phone.ts; faked by the jest harness. */
+export type PhotoTools = {
+  /** Lowercase hex SHA-256. */
+  sha256(bytes: Uint8Array): Promise<string>;
+  /**
+   * `bytes` (JPEG, PNG, WebP, or HEIC) as a JPEG with upright pixels and no EXIF, its long edge
+   * min(its own, spec.maxEdge), at spec.quality. null when the phone cannot decode them, which the
+   * caller answers as `unsupported`, as a failed sips run was in dotoriwiki.
+   */
+  jpeg(bytes: Uint8Array, spec: JpegSpec): Promise<Uint8Array | null>;
+};
+
+/** The resize that brings the long edge to maxEdge, or null when the image already fits: the never-enlarge rule. */
+export function fitWithin(width: number, height: number, maxEdge: number): { readonly width: number } | { readonly height: number } | null {
+  return Math.max(width, height) <= maxEdge ? null : width >= height ? { width: maxEdge } : { height: maxEdge };
+}
+
+/** The stored pixel size from a JPEG's SOF marker, before any EXIF orientation. null when there is none. */
+export function jpegSize(b: Uint8Array): { readonly width: number; readonly height: number } | null {
+  let i = 2;
+  while (i + 9 < b.length && b[i] === 0xff) {
+    const marker = b[i + 1]!;
+    if (marker === 0xff) {
+      i += 1;
+      continue;
+    }
+    const sof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (sof) return { height: (b[i + 5]! << 8) | b[i + 6]!, width: (b[i + 7]! << 8) | b[i + 8]! };
+    if (marker === 0xd9 || marker === 0xda) return null;
+    i += 2 + ((b[i + 2]! << 8) | b[i + 3]!);
+  }
+  return null;
+}
+
 export function describeDevice(d: PhotoDevice | null): string | null {
   if (!d || (!d.make && !d.model)) return null;
   // Apple writes "Apple" / "iPhone 15"; Samsung writes "samsung" / "SM-S928N". Don't repeat a make the model already starts with.

@@ -15,7 +15,6 @@ class OriginalPhotoModule : Module() {
   private fun result(file: File, original: Boolean): Map<String, Any?> = mapOf(
     "uri" to Uri.fromFile(file).toString(),
     "original" to original,
-    "latLong" to Originals.latLong(file)?.let { mapOf("lat" to it.first, "lon" to it.second) },
   )
 
   override fun definition() = ModuleDefinition {
@@ -25,11 +24,6 @@ class OriginalPhotoModule : Module() {
     AsyncFunction("copyAsset") { id: String, dir: String, name: String ->
       val copied = Originals.copy(context, Originals.assetUri(id), fileOf(dir), name)
       result(copied.file, copied.original)
-    }
-
-    /** The GPS fix in a file the app already holds, for camera shots and shared photos. */
-    AsyncFunction("latLong") { uri: String ->
-      Originals.latLong(fileOf(uri))?.let { mapOf("lat" to it.first, "lon" to it.second) }
     }
   }
 }
