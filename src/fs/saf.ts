@@ -73,6 +73,18 @@ export function safFs(tree: SafTree): Fs {
     throw new Error(`the storage would store ${path} as ${made.name}`);
   }
 
+  async function createBytes(path: WikiPath, bytes: Uint8Array): Promise<'created' | 'exists'> {
+    guard(path);
+    if (path === ROOT) throw new Error('the folder itself is not a file');
+    const there = fileAt(path);
+    if (there.exists) return fill(there, bytes);
+    if (dirAt(path).exists) throw new Error(`${path} is a folder`);
+    const made = makeFile(path);
+    if (!made) return 'exists';
+    if (bytes.length > 0) await writeWhole(made, bytes);
+    return 'created';
+  }
+
   return {
     async readText(path) {
       guard(path);
@@ -94,26 +106,29 @@ export function safFs(tree: SafTree): Fs {
       return [...new Set(d.list().map((e) => e.name.normalize('NFC')))].sort();
     },
 
-    async create(path, text) {
-      guard(path);
-      if (path === ROOT) throw new Error('the folder itself is not a file');
-      const there = fileAt(path);
-      if (there.exists) return fill(there, text);
-      if (dirAt(path).exists) throw new Error(`${path} is a folder`);
-      const made = makeFile(path);
-      if (!made) return 'exists';
-      if (text !== '') await writeWhole(made, text);
-      return 'created';
+    create(path, text) {
+      return createBytes(path, encode(text));
     },
 
     async write(path, text) {
       guard(path);
       if (path === ROOT) throw new Error('the folder itself is not a file');
       const there = fileAt(path);
-      if (there.exists) return writeWhole(there, text);
+      if (there.exists) return writeWhole(there, encode(text));
       if (dirAt(path).exists) throw new Error(`${path} is a folder`);
-      await writeWhole(makeFile(path) ?? fileAt(path), text);
+      await writeWhole(makeFile(path) ?? fileAt(path), encode(text));
     },
+
+    async readBytes(path) {
+      guard(path);
+      const f = fileAt(path);
+      if (f.exists) return f.bytes();
+      if (dirAt(path).exists) throw new Error(`${path} is a folder`);
+      rootAnswers();
+      return null;
+    },
+
+    createBytes,
 
     async remove(path) {
       guard(path);
@@ -156,18 +171,20 @@ export function safFs(tree: SafTree): Fs {
   };
 }
 
+const encode = (text: string) => new TextEncoder().encode(text);
+
 /** The empty-file rule of the port's create. */
-async function fill(file: File, text: string): Promise<'created' | 'exists'> {
-  if (file.size > 0 || text === '') return 'exists';
-  await writeWhole(file, text);
+async function fill(file: File, bytes: Uint8Array): Promise<'created' | 'exists'> {
+  if (file.size > 0 || bytes.length === 0) return 'exists';
+  await writeWhole(file, bytes);
   return 'created';
 }
 
 /** writeBytes is async, and a handle closed before it settles rejects, so it is awaited inside the try. */
-async function writeWhole(file: File, text: string): Promise<void> {
+async function writeWhole(file: File, bytes: Uint8Array): Promise<void> {
   const handle = file.open(FileMode.Truncate);
   try {
-    await handle.writeBytes(new TextEncoder().encode(text));
+    await handle.writeBytes(bytes);
   } finally {
     handle.close();
   }

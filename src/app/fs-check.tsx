@@ -83,18 +83,20 @@ function safSeed(tree: SafTree): Seed {
     }
     return dir;
   }
+  async function bytes(rel: string, b: Uint8Array) {
+    const segs = rel.split('/');
+    const made = folder(segs.slice(0, -1)).createFile(segs.at(-1)!, 'application/octet-stream');
+    if (b.length === 0) return;
+    const handle = made.open(FileMode.Truncate);
+    try {
+      await handle.writeBytes(b);
+    } finally {
+      handle.close();
+    }
+  }
   return {
-    async file(rel, text) {
-      const segs = rel.split('/');
-      const made = folder(segs.slice(0, -1)).createFile(segs.at(-1)!, 'application/octet-stream');
-      if (text === '') return;
-      const handle = made.open(FileMode.Truncate);
-      try {
-        await handle.writeBytes(new TextEncoder().encode(text));
-      } finally {
-        handle.close();
-      }
-    },
+    file: (rel, text) => bytes(rel, new TextEncoder().encode(text)),
+    bytes,
     async folder(rel) {
       folder(rel.split('/'));
     },

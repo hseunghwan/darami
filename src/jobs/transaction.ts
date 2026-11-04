@@ -325,6 +325,8 @@ export function openJournal(deps: JournalDeps): Journal {
         const c = committed();
         return (await fs.listTree(dir)).filter((path) => c.get(path) !== null);
       },
+      // No job journals a photo file, so the folder's bytes are the committed ones.
+      readBytes: (path) => fs.readBytes(path),
     }),
   };
 }

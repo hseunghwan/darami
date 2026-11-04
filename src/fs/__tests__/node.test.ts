@@ -11,6 +11,10 @@ function seedAt(root: string): Seed {
       mkdirSync(dirname(on(rel)), { recursive: true });
       writeFileSync(on(rel), Buffer.from(text, 'utf8'));
     },
+    async bytes(rel, bytes) {
+      mkdirSync(dirname(on(rel)), { recursive: true });
+      writeFileSync(on(rel), bytes);
+    },
     async folder(rel) {
       mkdirSync(on(rel), { recursive: true });
     },

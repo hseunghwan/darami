@@ -101,6 +101,8 @@ export function countingFs(inner: Fs): Fs & { calls(method: keyof Fs, match?: (p
     write: counted('write'),
     remove: counted('remove'),
     listTree: counted('listTree'),
+    readBytes: counted('readBytes'),
+    createBytes: counted('createBytes'),
     calls: (method, match = () => true) => log.filter(([m, p]) => m === method && match(p)).length,
     listed: () => log.filter(([m]) => m === 'list').map(([, p]) => p).sort(),
     reset: () => void (log = []),
@@ -111,17 +113,17 @@ export type Cut = { readonly at: number; readonly how: 'before' | 'torn' };
 
 /**
  * The node adapter with one kill. Changes (write, remove, and a create that writes) count from 1.
- * At `at`, 'before' kills without touching the folder; 'torn' leaves the first half of the text's
- * UTF-8 bytes, as a write cut off part way does, then kills.
+ * At `at`, 'before' kills without touching the folder; 'torn' leaves the first half of the
+ * bytes, as a write cut off part way does, then kills.
  */
 export function faultyFs(root: string, cut: Cut | null): Fs & { changes(): number } {
   const inner = nodeFs(root);
   let changes = 0;
-  const hit = async (what: string, path: WikiPath, text: string | null) => {
+  const hit = async (what: string, path: WikiPath, content: string | Uint8Array | null) => {
     changes += 1;
     if (!cut || changes !== cut.at) return;
-    if (cut.how === 'torn' && text !== null) {
-      const bytes = Buffer.from(text, 'utf8');
+    if (cut.how === 'torn' && content !== null) {
+      const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
       const at = join(root, ...path.split('/'));
       mkdirSync(dirname(at), { recursive: true });
       writeFileSync(at, bytes.subarray(0, Math.floor(bytes.length / 2)));
@@ -138,6 +140,10 @@ export function faultyFs(root: string, cut: Cut | null): Fs & { changes(): numbe
     async create(path, text) {
       if (!(await inner.readText(path).catch(() => 'not a file'))) await hit('create', path, text);
       return inner.create(path, text);
+    },
+    async createBytes(path, bytes) {
+      if (!(await inner.readBytes(path).catch(() => null))?.length) await hit('createBytes', path, bytes);
+      return inner.createBytes(path, bytes);
     },
     async remove(path) {
       await hit('remove', path, null);

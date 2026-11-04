@@ -379,6 +379,9 @@ export async function openBook({ fs: inner, journal: innerJournal, store, now, d
         if (t?.kind === 'answer') setStaged(t.dir, t.name, false);
       }),
     listTree: (dir) => inner.listTree(dir),
+    // Photo files are no memo, ledger, or answer: the book has nothing to learn from them.
+    readBytes: (path) => inner.readBytes(path),
+    createBytes: (path, bytes) => inner.createBytes(path, bytes),
   };
 
   async function journalWrite(op: () => Promise<void>, after: () => void): Promise<void> {
