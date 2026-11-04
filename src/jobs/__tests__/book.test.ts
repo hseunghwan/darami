@@ -37,7 +37,7 @@ test('an accepted memo is in the book before any pass, and costs the book no fol
   const w = await wiki();
   assert.equal(w.engine.book.current().ready, true);
   await w.engine.accept(memo(1, '오늘 배운 것'));
-  assert.deepEqual(w.engine.book.current().rows, [{ id: id(1), capturedAt: '2026-10-29T08:01:00+09:00', preview: '오늘 배운 것', source: 'typed', at: { state: 'inbox' } }]);
+  assert.deepEqual(w.engine.book.current().rows, [{ id: id(1), capturedAt: '2026-10-29T08:01:00+09:00', preview: '오늘 배운 것', source: 'typed', photos: 0, at: { state: 'inbox' } }]);
   assert.deepEqual(w.engine.book.current().counts, { working: 1, confirm: 0 });
   assert.equal(w.fs.calls('list'), 0);
   assert.equal(w.fs.calls('readText'), 0);

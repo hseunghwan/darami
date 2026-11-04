@@ -4,13 +4,15 @@ import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInpu
 import type { MemoRow } from '../../jobs/engine';
 import type { GeoFix } from '../../lib/capture';
 import { locate } from '../../lib/location';
-import { clock12, firstPage, recentTime, STAGE } from '../../lib/memos';
+import { clock12, filedText, firstPage, recentTime, STAGE } from '../../lib/memos';
+import { canSend } from '../../lib/photos';
 import { filingStatus, statusLine } from '../../lib/status';
-import { fileMemo, getApp, useApp, type Filed } from '../../state';
+import { fileMemo, getApp, useApp } from '../../state';
 import { DomainChips } from '../../ui/domain-chips';
 import { useDraft } from '../../ui/draft';
 import { useNow } from '../../ui/hooks';
 import { Icon } from '../../ui/icon';
+import { PhotoButtons, PhotoCount, PhotoStrip, usePhotoPicker } from '../../ui/photos';
 import { Header, Notice, Pill, PrimaryButton, s as ui, Screen, SectionTitle } from '../../ui/parts';
 import { useTheme } from '../../ui/theme';
 import { copy } from '../../text';
@@ -67,6 +69,7 @@ function RecentRow({ memo, now }: { memo: MemoRow; now: Date }) {
       <View style={st.meta}>
         <Text style={{ color: t.faint, fontSize: 12 }}>{recentTime(new Date(memo.capturedAt), now)}</Text>
         <Pill label={stage.label} tone={stage.tone} />
+        <PhotoCount count={memo.photos} />
         {page ? (
           <View style={st.page}>
             <Icon name="file" size={12} color={t.link} />
@@ -80,13 +83,11 @@ function RecentRow({ memo, now }: { memo: MemoRow; now: Date }) {
   );
 }
 
-const filedNotice = (r: Exclude<Filed, { kind: 'filed' }>): string =>
-  r.kind === 'no-wiki' ? copy.filing.noWiki : r.kind === 'invalid' ? copy.filing.invalid(r.detail) : copy.filing.notSaved;
-
 export default function MemoTab() {
   const t = useTheme();
   const input = useRef<TextInputInstance>(null);
   const draft = useDraft();
+  const picker = usePhotoPicker(draft);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [attach, setAttach] = useState(true);
@@ -105,12 +106,13 @@ export default function MemoTab() {
 
   async function send() {
     const text = draft.text.trim();
-    if (!text || sending) return;
+    if (!canSend(text, draft.photos) || sending || picker.busy) return;
     setSending(true);
     setNotice(null);
-    const r = await fileMemo({ id: draft.id, text, source: 'typed', domainHint: draft.hint, location: attach && fix.kind === 'found' ? fix.fix : null });
+    const r = await fileMemo({ id: draft.id, text, source: 'typed', domainHint: draft.hint, location: attach && fix.kind === 'found' ? fix.fix : null, photos: draft.photos });
     setSending(false);
-    if (r.kind !== 'filed') return setNotice(filedNotice(r));
+    if (r.kind === 'photo-refused') draft.refused(r);
+    if (r.kind !== 'filed') return setNotice(filedText(r));
     draft.filed();
     setAttach(true);
   }
@@ -144,6 +146,8 @@ export default function MemoTab() {
               style={[st.textarea, { color: t.fg }]}
               textAlignVertical="top"
             />
+            <PhotoStrip picker={picker} disabled={sending} />
+            <PhotoButtons picker={picker} disabled={sending} />
             <View style={st.composeMeta}>
               <View style={st.inline4}>
                 <Icon name="clock" size={14} color={t.faint} />
@@ -179,7 +183,7 @@ export default function MemoTab() {
             <DomainChips value={draft.hint} onChange={draft.setHint} />
           </View>
 
-          <PrimaryButton label={copy.common.send} icon="send" busy={sending} disabled={draft.text.trim() === ''} onPress={send} />
+          <PrimaryButton label={copy.common.send} icon="send" busy={sending} disabled={!canSend(draft.text, draft.photos) || picker.busy} onPress={send} />
           {notice && (
             <Notice tone="bad">
               <Text accessibilityRole="alert" style={{ color: t.bad, fontSize: 14, lineHeight: 21 }}>{notice}</Text>
@@ -201,6 +205,7 @@ export default function MemoTab() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      {picker.sheet}
     </Screen>
   );
 }

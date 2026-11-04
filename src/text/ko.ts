@@ -176,6 +176,9 @@ export const ko = {
     noWiki: '저장할 위키 폴더가 없어요. 설정에서 골라 주세요.',
     invalid: (detail: string) => `이 메모는 저장할 수 없어요: ${detail}`,
     notSaved: '위키 폴더에 저장하지 못했어요. 글은 그대로 있으니 다시 해 주세요.',
+    photoMissing: (n: number) => `${n}번째 사진을 찾을 수 없어서 뺐어요. 다시 보내 주세요.`,
+    photoUnsupported: (n: number) => `${n}번째 사진은 이 폰에서 열 수 없어서 뺐어요. 다시 보내 주세요.`,
+    photoConflict: '사진을 저장하지 못했어요. 다시 보내 주세요.',
   },
   memoTab: {
     input: '메모 내용',
@@ -266,8 +269,6 @@ export const ko = {
     note: '한 줄 덧붙이기 (선택)',
     noteLabel: '한 줄 덧붙이기',
     notePlaceholder: '왜 저장하는지 적어 두면 요약이 더 좋아져요',
-    photosLater: '사진은 다음 버전부터 저장돼요. 글만 저장해요.',
-    onlyPhotos: '사진은 다음 버전부터 저장돼서 아직 저장할 게 없어요.',
   },
   settings: {
     theme: { system: '시스템', dark: '다크', light: '라이트' },

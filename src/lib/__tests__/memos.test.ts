@@ -1,4 +1,4 @@
-import { finishedText, groupByDay, recentTime, releasedText } from '../memos';
+import { filedText, finishedText, groupByDay, recentTime, releasedText } from '../memos';
 import { withIGa, withRo } from '../../text/ko';
 
 it('groups by local day as 오늘, 어제, then dates', () => {
@@ -45,4 +45,11 @@ it('tells a confirm that came too late apart from a move that came too late', ()
   expect(releasedText({ kind: 'moved-on', started: true }, 'move')).toBe('이미 정리가 시작돼서 옮길 수 없어요.');
   expect(releasedText({ kind: 'moved-on', started: false }, 'move')).toBe('지금 상태에서는 옮길 수 없어요.');
   expect(releasedText({ kind: 'gone' }, 'move')).toBe('위키 폴더에 이 메모가 없어요.');
+});
+
+it('says which photo a refused send took off, so the user can send again', () => {
+  expect(filedText({ kind: 'photo-refused', n: 2, reason: 'missing' })).toBe('2번째 사진을 찾을 수 없어서 뺐어요. 다시 보내 주세요.');
+  expect(filedText({ kind: 'photo-refused', n: 1, reason: 'unsupported' })).toBe('1번째 사진은 이 폰에서 열 수 없어서 뺐어요. 다시 보내 주세요.');
+  expect(filedText({ kind: 'photo-refused', n: 1, reason: 'conflict' })).toBe('사진을 저장하지 못했어요. 다시 보내 주세요.');
+  expect(filedText({ kind: 'failed', message: 'x' })).toBe('위키 폴더에 저장하지 못했어요. 글은 그대로 있으니 다시 해 주세요.');
 });

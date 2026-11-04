@@ -1,29 +1,34 @@
-import * as Crypto from 'expo-crypto';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { BackHandler, KeyboardAvoidingView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { GeoFix } from '../lib/capture';
 import { removeQuietly } from '../lib/files';
 import { locate } from '../lib/location';
+import { filedText } from '../lib/memos';
+import { canSend } from '../lib/photos';
 import { memoText, parseShared, preview } from '../lib/shared';
+import { fromShare } from '../pick';
 import { fileMemo, getApp } from '../state';
 import { DomainChips } from '../ui/domain-chips';
+import { useDraft } from '../ui/draft';
 import { Icon } from '../ui/icon';
 import { goBack, Notice, PrimaryButton, Sheet } from '../ui/parts';
+import { PhotoStrip, usePhotoPicker } from '../ui/photos';
 import { useTheme } from '../ui/theme';
 import { copy } from '../text';
 
 /**
  * The share and text-selection sheet. It stays open, Save busy, until accept answers, and leaves
- * for the app the text came from only once the memo is whole in the folder. Photos come with P6.
+ * for the app the text came from only once the memo is whole in the folder. Shared photos are the
+ * files CaptureActivity copied; closing the sheet without saving deletes them.
  */
 export default function Compose() {
   const t = useTheme();
   const params = useLocalSearchParams<{ source?: string; text?: string; subject?: string; photos?: string }>();
   const shared = parseShared(params);
-  const [id] = useState(() => Crypto.randomUUID());
-  const [note, setNote] = useState('');
-  const [hint, setHint] = useState<string | null>(null);
+  const draft = useDraft(false);
+  const picker = usePhotoPicker(draft);
+  const [importing, setImporting] = useState((shared?.photos.length ?? 0) > 0);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [fix, setFix] = useState<GeoFix | null>(null);
@@ -32,36 +37,44 @@ export default function Compose() {
     if (getApp().settings.location) void locate().then(setFix);
   }, []);
 
-  // CaptureActivity already copied shared photos into files/outbox/pending; nothing reads them until P6.
-  const photos = shared?.photos ?? [];
-  const photoKey = photos.join('\n');
-  useEffect(() => removeQuietly(photoKey ? photoKey.split('\n') : []), [photoKey]);
+  const photoKey = shared?.photos.join('\n') ?? '';
+  useEffect(() => {
+    if (!photoKey) return;
+    void fromShare(photoKey.split('\n')).then((ps) => {
+      draft.addPhotos(ps);
+      setImporting(false);
+    });
+    // Once per share: the draft's own functions change on every render.
+  }, [photoKey]);
+
+  const close = () => {
+    removeQuietly(shared?.photos ?? []);
+    goBack();
+  };
 
   if (!shared) return <Sheet onClose={goBack}><Text style={{ color: t.muted, fontSize: 14 }}>{copy.compose.nothing}</Text></Sheet>;
   const card = shared.text ? preview(shared) : null;
-  const text = memoText(shared, note);
+  const text = memoText(shared, draft.text);
+  const ready = canSend(text, draft.photos) && !importing;
 
   async function save() {
-    if (!shared || !text.trim() || saving) return;
+    if (!shared || !ready || saving) return;
     setSaving(true);
     setNotice(null);
-    const r = await fileMemo({ id, text, source: shared.source, domainHint: hint, location: fix });
+    const r = await fileMemo({ id: draft.id, text, source: shared.source, domainHint: draft.hint, location: fix, photos: draft.photos });
     setSaving(false);
     if (r.kind === 'filed') return BackHandler.exitApp();
-    setNotice(r.kind === 'no-wiki' ? copy.filing.noWiki : r.kind === 'invalid' ? copy.filing.invalid(r.detail) : copy.filing.notSaved);
+    if (r.kind === 'photo-refused') draft.refused(r);
+    setNotice(filedText(r));
   }
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-      <Sheet onClose={goBack}>
+      <Sheet onClose={close}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ color: t.fg, fontSize: 17, fontWeight: '600' }}>{copy.compose.title}</Text>
         </View>
-        {photos.length > 0 && (
-          <Notice tone="plain">
-            <Text style={{ color: t.muted, fontSize: 14, lineHeight: 21 }}>{text.trim() ? copy.compose.photosLater : copy.compose.onlyPhotos}</Text>
-          </Notice>
-        )}
+        <PhotoStrip picker={picker} disabled={saving} />
         {card && (
           <View style={[st.card, { backgroundColor: t.bg, borderColor: t.cardLine }]}>
             <View style={[st.thumb, { backgroundColor: t.bubble }]}>
@@ -84,8 +97,8 @@ export default function Compose() {
           <Text style={{ color: t.faint, fontSize: 12, fontWeight: '500' }}>{copy.compose.note}</Text>
           <TextInput
             accessibilityLabel={copy.compose.noteLabel}
-            value={note}
-            onChangeText={setNote}
+            value={draft.text}
+            onChangeText={draft.setText}
             placeholder={copy.compose.notePlaceholder}
             placeholderTextColor={t.faint}
             style={[st.input, { borderColor: t.line2, backgroundColor: t.bg, color: t.fg }]}
@@ -94,7 +107,7 @@ export default function Compose() {
 
         <View style={{ gap: 8 }}>
           <Text style={{ color: t.faint, fontSize: 12, fontWeight: '500' }}>{copy.common.whereToFile}</Text>
-          <DomainChips value={hint} onChange={setHint} wrap />
+          <DomainChips value={draft.hint} onChange={draft.setHint} wrap />
         </View>
 
         {notice && (
@@ -102,7 +115,7 @@ export default function Compose() {
             <Text accessibilityRole="alert" style={{ color: t.bad, fontSize: 14, lineHeight: 21 }}>{notice}</Text>
           </Notice>
         )}
-        <PrimaryButton label={saving ? copy.common.saving : copy.common.save} busy={saving} disabled={!text.trim()} onPress={save} />
+        <PrimaryButton label={saving ? copy.common.saving : copy.common.save} busy={saving || importing} disabled={!ready} onPress={save} />
       </Sheet>
     </KeyboardAvoidingView>
   );

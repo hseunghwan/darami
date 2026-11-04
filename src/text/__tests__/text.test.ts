@@ -29,6 +29,8 @@ const ARGS: Record<string, unknown[][]> = {
   'status.filing': [[2]],
   'status.waiting': [[1], [3]],
   'filing.invalid': [['text: over 64 KiB']],
+  'filing.photoMissing': [[2]],
+  'filing.photoUnsupported': [[1]],
   'photos.nth': [[1, 'Chicago'], [2, null]],
   'photos.remove': [[1]],
   'photos.count': [[1], [3]],

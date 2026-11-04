@@ -1,4 +1,6 @@
 import type { MemoSource } from '../core/pages';
+import type { AttachmentRequest } from '../core/photos';
+import type { DraftPhoto } from './photos';
 
 /** The snake_case record core's parseMemo validates, so a typed or shared memo is checked by the code that reads a memo file. */
 export type MemoRequest = {
@@ -9,6 +11,7 @@ export type MemoRequest = {
   readonly location: GeoFix | null;
   readonly source: MemoSource;
   readonly domain_hint: string | null;
+  readonly attachments: readonly AttachmentRequest[];
 };
 
 const pad = (n: number) => String(Math.trunc(Math.abs(n))).padStart(2, '0');
@@ -33,7 +36,6 @@ export function deviceTimeZone(): string {
 /** `place` is shown in the app (구 and 동); `address` is only recorded (down to the 번지 or building). */
 export type GeoFix = { lat: number; lon: number; place: string | null; address: string | null };
 
-/** No photos: they come with P6, and accept refuses them until then. */
 export type CaptureInput = {
   readonly id: string;
   readonly text: string;
@@ -41,6 +43,8 @@ export type CaptureInput = {
   readonly source: MemoSource;
   readonly domainHint: string | null;
   readonly location: GeoFix | null;
+  /** Photo n is photos[n - 1]. */
+  readonly photos: readonly DraftPhoto[];
 };
 
 export function buildMemoRequest(input: CaptureInput): MemoRequest {
@@ -52,5 +56,6 @@ export function buildMemoRequest(input: CaptureInput): MemoRequest {
     location: input.location,
     source: input.source,
     domain_hint: input.domainHint,
+    attachments: input.photos.map((p, i) => ({ n: i + 1, origin: p.origin, place: p.place, address: p.address })),
   };
 }

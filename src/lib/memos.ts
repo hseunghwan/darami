@@ -2,6 +2,7 @@ import type { Verdict } from '../core/ledger';
 import type { DomainName } from '../core/types';
 import type { Finished, Placement } from '../jobs/engine';
 import type { MemoState } from '../core/places';
+import type { Filed } from '../state';
 import { copy } from '../text';
 
 export type Tone = 'wait' | 'route' | 'done' | 'warn' | 'bad';
@@ -94,4 +95,18 @@ export function groupByDay<T>(items: readonly T[], now: Date, when: (item: T) =>
     else groups.push({ label, items: [item] });
   }
   return groups;
+}
+
+/** Why a memo was not filed, in the memo tab's and the share sheet's notice. */
+export function filedText(r: Exclude<Filed, { kind: 'filed' }>): string {
+  switch (r.kind) {
+    case 'no-wiki':
+      return copy.filing.noWiki;
+    case 'invalid':
+      return copy.filing.invalid(r.detail);
+    case 'failed':
+      return copy.filing.notSaved;
+    case 'photo-refused':
+      return r.reason === 'missing' ? copy.filing.photoMissing(r.n) : r.reason === 'unsupported' ? copy.filing.photoUnsupported(r.n) : copy.filing.photoConflict;
+  }
 }

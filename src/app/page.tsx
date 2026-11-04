@@ -2,9 +2,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import type { DomainName } from '../core/types';
-import { markdownSpans, pageLabel } from '../lib/markdown';
+import { markdownBlocks, pageLabel } from '../lib/markdown';
 import { usePage } from '../state';
 import { Header, Screen } from '../ui/parts';
+import { PhotoBlock } from '../ui/photos';
 import { Spans } from '../ui/spans';
 import { useTheme } from '../ui/theme';
 import { copy } from '../text';
@@ -27,7 +28,9 @@ export default function Page() {
               {[s.page.ref.domain, s.page.type, s.page.updated && copy.page.updated(s.page.updated)].filter(Boolean).join(' · ')}
             </Text>
             {s.page.summary !== '' && <Text selectable style={{ color: t.muted, fontSize: 14, lineHeight: 21 }}>{s.page.summary}</Text>}
-            <Spans spans={markdownSpans(s.page.body.trim())} links={s.page.links} />
+            {markdownBlocks(s.page.body.trim()).map((b, i) =>
+              b.kind === 'photo' ? <PhotoBlock key={i} file={b.file} /> : <Spans key={i} spans={b.spans} links={s.page.links} />,
+            )}
           </>
         )}
       </ScrollView>

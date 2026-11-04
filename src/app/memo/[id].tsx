@@ -9,6 +9,7 @@ import { confirmMemo, retryMemo, useMemoDetail } from '../../state';
 import { useNow } from '../../ui/hooks';
 import { Icon } from '../../ui/icon';
 import { Card, FailureLine, Header, Notice, PrimaryButton, Screen, SectionTitle, SmallButton } from '../../ui/parts';
+import { MemoThumbs } from '../../ui/photos';
 import { openPage } from '../../ui/spans';
 import { useTheme, type Theme } from '../../ui/theme';
 import { copy } from '../../text';
@@ -142,7 +143,8 @@ export default function MemoDetailScreen() {
       <Header title={copy.common.memo} back />
       <ScrollView contentContainerStyle={st.main}>
         <View style={{ gap: 12 }}>
-          <Text selectable style={{ color: t.fg, fontSize: 17, lineHeight: 27 }}>{memo.text}</Text>
+          {memo.text !== '' && <Text selectable style={{ color: t.fg, fontSize: 17, lineHeight: 27 }}>{memo.text}</Text>}
+          <MemoThumbs files={memo.photos} />
           <View style={st.metaRow}>
             <Text style={st.meta(t)}>{`${monthDay(captured)} ${clock12(captured)}`}</Text>
             {memo.place && <Text style={st.meta(t)}>{memo.place}</Text>}
