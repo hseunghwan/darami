@@ -199,6 +199,19 @@ Checked on 2026-11-05 on the Android 16 emulator, after one native rebuild of th
 - A short memo with a photo and a link, sent to `someday`, was stored correctly but ingested as `nothing to file`. `gpt-6-luna` at medium effort has now skipped three thin memos. Whether ingest should run on a stronger model is still open.
 - The emulator's memos record `tz: Asia/Seoul` with `captured_at` at offset `+00:00`, because the emulator's own zone is GMT. That has not been checked on a phone set to Seoul.
 
+## What P7 found
+
+Checked on 2026-11-05.
+
+- README.md and README.ko.md describe the app on its own: install, setup, memos, sharing, photos and links, held and failed memos, the waiting badges, Ask, the folder layout, privacy, limits, building, and the personal-use note. A script matched all 40 on-screen labels the READMEs quote against src/text/en.ts and ko.ts.
+- CI built a release APK from `main` at 0a703c6 in 32 minutes: `darami-0.1.0-0a703c6-debug-signed.apk`, 66 MB, with arm64-v8a and x86_64. Its `.sha256` matched the download. The repository has no signing secrets yet, so the APK carries the debug key.
+- The APK installed on a clean Android 15 emulator that never had darami, and opened on the login step that the README describes. The rest of the clean-phone walkthrough waits for a ChatGPT device-code approval. Two codes expired unapproved.
+- No release exists yet. Tagging `v*` makes CI attach the APK and its checksum to a GitHub release.
+- The starter `dotoriwiki.yaml` in both presets still carries dotoriwiki's comments about the gateway and `models.json`. The README warns about them.
+- Still open:
+  - moving the author's live wiki to a phone folder
+  - opening the same folder in Obsidian on the phone (Done when 5)
+
 ## Shape
 
 ```
