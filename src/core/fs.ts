@@ -82,7 +82,19 @@ export type Fs = {
    * nothing. `[]` when `dir` is missing. Throws when `dir` is a file. Not limited to `.md`.
    */
   listTree(dir: WikiPath): Promise<readonly WikiPath[]>;
+
+  /** The file's bytes exactly as stored. null when no file is there, a missing parent included. Throws on a folder. */
+  readBytes(path: WikiPath): Promise<Uint8Array | null>;
+
+  /**
+   * create's rules, for bytes: makes `path` with its missing parent folders, holding `bytes`, and
+   * never replaces a byte. 'created' when no file was there or an empty one was; 'exists' when a
+   * file with at least one byte is there, or an empty one is and `bytes` is empty. A kill inside
+   * the write can leave a prefix of `bytes`: the caller, which knows what the bytes should be,
+   * decides what that means. Throws, and leaves no renamed twin, as create does.
+   */
+  createBytes(path: WikiPath, bytes: Uint8Array): Promise<'created' | 'exists'>;
 };
 
 /** The Fs with no way to change a file: what a chat, the page viewer, and the save-time check read through. */
-export type ReadFs = Pick<Fs, 'readText' | 'list' | 'listTree'>;
+export type ReadFs = Pick<Fs, 'readText' | 'list' | 'listTree' | 'readBytes'>;

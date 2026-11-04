@@ -15,6 +15,7 @@ import { ROOT, type WikiPath } from '../core/layout';
 /** Raw writes into the case's folder, bypassing the port. `rel` is `/`-separated and may be NFD. */
 export type Seed = {
   file(rel: string, text: string): Promise<void>;
+  bytes(rel: string, bytes: Uint8Array): Promise<void>;
   folder(rel: string): Promise<void>;
   /** Deletes the case's folder itself, so the Fs is bound to nothing. */
   dropRoot(): Promise<void>;
@@ -39,6 +40,15 @@ export async function throws(p: Promise<unknown>, ok: (e: unknown) => boolean, w
   }
   throw new Error(`${what}: did not throw`);
 }
+
+/** Compared as hex: JSON of a Uint8Array would not show a missing or extra byte at the end. */
+export const hex = (b: Uint8Array | null) => (b === null ? null : Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''));
+const sameBytes = (actual: Uint8Array | null, expected: Uint8Array | null, what: string) => {
+  if (hex(actual) !== hex(expected)) throw new Error(`${what}: got ${actual === null ? 'null' : `${actual.length} bytes`} that differ from the ${expected === null ? 'null' : `${expected.length} bytes`} wanted`);
+};
+/** Every byte value, an invalid UTF-8 run, CRLF, and a BOM: what a text path would mangle. */
+const EVERY_BYTE = Uint8Array.from([...Array.from({ length: 256 }, (_, i) => i), 0xc3, 0x28, 0xa0, 0xa1, 0x0d, 0x0a, 0xef, 0xbb, 0xbf, 0xff, 0xd9]);
+const big = (n: number) => Uint8Array.from({ length: n }, (_, i) => (i * 31 + (i >> 8)) & 0xff);
 
 const unreachable = (e: unknown) => e instanceof FolderUnreachable;
 // Not `instanceof Error`: node:fs rejects with errors from another realm under jest.
@@ -318,6 +328,112 @@ export const FS_CASES: readonly FsCase[] = [
       }
       await throws(fs.write(ROOT, 'x'), otherError, 'write the root');
       await throws(fs.remove(ROOT), otherError, 'remove the root');
+    },
+  },
+  {
+    name: 'readBytes: every byte value comes back exactly, an invalid UTF-8 run, CRLF, and a BOM included',
+    run: async (fs, seed) => {
+      await seed.bytes('_attachments/a-1.jpg', EVERY_BYTE);
+      sameBytes(await fs.readBytes(at('_attachments/a-1.jpg')), EVERY_BYTE, 'bytes');
+    },
+  },
+  {
+    name: 'readBytes: null for a missing file, a missing parent, and a parent that is a file; a folder throws',
+    run: async (fs, seed) => {
+      await seed.file('CLAUDE.md', '# root\n');
+      await seed.folder('_originals');
+      same(await fs.readBytes(at('_originals/a-1.jpg')), null, 'missing file');
+      same(await fs.readBytes(at('없음/a-1.jpg')), null, 'missing parent');
+      same(await fs.readBytes(at('CLAUDE.md/a-1.jpg')), null, 'parent is a file');
+      await throws(fs.readBytes(at('_originals')), otherError, 'a folder');
+      await throws(fs.readBytes(at('../x')), badPath, 'a bad path');
+    },
+  },
+  {
+    name: 'readBytes: a file create wrote reads back as its UTF-8 bytes, and an empty file as no bytes',
+    run: async (fs) => {
+      await fs.create(at('a.md'), '도토리\r\n');
+      sameBytes(await fs.readBytes(at('a.md')), new TextEncoder().encode('도토리\r\n'), 'utf-8');
+      await fs.create(at('.gitkeep'), '');
+      sameBytes(await fs.readBytes(at('.gitkeep')), new Uint8Array(), 'empty');
+    },
+  },
+  {
+    name: 'createBytes: makes the parent folders, answers created, and 3 MiB read back identical',
+    run: async (fs) => {
+      const b = big(3 * 1024 * 1024);
+      same(await fs.createBytes(at('_originals/a-1.heic'), b), 'created', 'created');
+      sameBytes(await fs.readBytes(at('_originals/a-1.heic')), b, '3 MiB');
+      same(await fs.list(ROOT), ['_originals'], 'made folders');
+    },
+  },
+  {
+    name: 'createBytes: a second call answers exists, keeps the first bytes, and leaves no renamed twin',
+    run: async (fs) => {
+      same(await fs.createBytes(at('_attachments/a-1.jpg'), EVERY_BYTE), 'created', 'first');
+      same(await fs.createBytes(at('_attachments/a-1.jpg'), big(1000)), 'exists', 'second');
+      sameBytes(await fs.readBytes(at('_attachments/a-1.jpg')), EVERY_BYTE, 'kept');
+      same(await fs.list(at('_attachments')), ['a-1.jpg'], 'no twin');
+    },
+  },
+  {
+    name: 'createBytes: an empty file is filled and answered created; empty bytes over an empty file are exists',
+    run: async (fs, seed) => {
+      await seed.bytes('_originals/a-1.jpg', new Uint8Array());
+      same(await fs.createBytes(at('_originals/a-1.jpg'), EVERY_BYTE), 'created', 'filled');
+      sameBytes(await fs.readBytes(at('_originals/a-1.jpg')), EVERY_BYTE, 'bytes');
+      await seed.bytes('_originals/b-1.jpg', new Uint8Array());
+      same(await fs.createBytes(at('_originals/b-1.jpg'), new Uint8Array()), 'exists', 'nothing to fill');
+      same(await fs.list(at('_originals')), ['a-1.jpg', 'b-1.jpg'], 'no twin');
+    },
+  },
+  {
+    name: 'createBytes: a file with bytes is never touched, a prefix of the new bytes included',
+    run: async (fs, seed) => {
+      const prefix = EVERY_BYTE.subarray(0, 100);
+      await seed.bytes('_originals/a-1.jpg', prefix);
+      same(await fs.createBytes(at('_originals/a-1.jpg'), EVERY_BYTE), 'exists', 'exists');
+      sameBytes(await fs.readBytes(at('_originals/a-1.jpg')), prefix, 'the prefix kept');
+    },
+  },
+  {
+    name: 'createBytes: names land exactly as asked, with nothing added',
+    run: async (fs) => {
+      for (const name of ['a-1.jpg', 'a-2.heic', 'a-3.png', 'a-4.webp', '.nomedia', '사진-1.jpg']) {
+        same(await fs.createBytes(at(`_originals/${name}`), name === '.nomedia' ? new Uint8Array() : EVERY_BYTE), 'created', name);
+      }
+      same(await fs.list(at('_originals')), ['.nomedia', 'a-1.jpg', 'a-2.heic', 'a-3.png', 'a-4.webp', '사진-1.jpg'], 'names');
+    },
+  },
+  {
+    name: 'createBytes: a folder at the path throws and keeps what it holds; a file where a parent belongs throws',
+    run: async (fs, seed) => {
+      await seed.bytes('_attachments/x/a-1.jpg', EVERY_BYTE);
+      await throws(fs.createBytes(at('_attachments/x'), EVERY_BYTE), otherError, 'a folder');
+      sameBytes(await fs.readBytes(at('_attachments/x/a-1.jpg')), EVERY_BYTE, 'contents');
+      await throws(fs.createBytes(at('_attachments/x/a-1.jpg/b.jpg'), EVERY_BYTE), otherError, 'a file in the way');
+      await throws(fs.createBytes(ROOT, EVERY_BYTE), otherError, 'the root');
+      same(await fs.list(ROOT), ['_attachments'], 'no twin');
+    },
+  },
+  {
+    name: 'listTree and remove see a bytes file like any other',
+    run: async (fs) => {
+      await fs.createBytes(at('_attachments/a-1.jpg'), EVERY_BYTE);
+      same(await fs.listTree(at('_attachments')), ['_attachments/a-1.jpg'], 'listed');
+      same(await fs.remove(at('_attachments/a-1.jpg')), 'removed', 'removed');
+      same(await fs.readBytes(at('_attachments/a-1.jpg')), null, 'gone');
+    },
+  },
+  {
+    name: 'FolderUnreachable: readBytes and createBytes throw it once the folder is gone, and createBytes makes nothing',
+    run: async (fs, seed) => {
+      await seed.bytes('_originals/a-1.jpg', EVERY_BYTE);
+      await seed.dropRoot();
+      await throws(fs.readBytes(at('_originals/a-1.jpg')), unreachable, 'readBytes');
+      await throws(fs.readBytes(at('_originals/b-1.jpg')), unreachable, 'readBytes missing');
+      await throws(fs.createBytes(at('_originals/b-1.jpg'), EVERY_BYTE), unreachable, 'createBytes');
+      await throws(fs.list(ROOT), unreachable, 'still gone after createBytes');
     },
   },
   {

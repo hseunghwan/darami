@@ -30,6 +30,25 @@ export function nodeFs(root: string): Fs {
     }
   }
 
+  async function createBytes(path: WikiPath, bytes: Uint8Array): Promise<'created' | 'exists'> {
+    const at = full(path);
+    if (path === ROOT) throw new Error('the folder itself is not a file');
+    // Before mkdir, which would otherwise make a deleted root again.
+    await rootAnswers();
+    await mkdir(dirname(at), { recursive: true });
+    try {
+      await writeFile(at, bytes, { flag: 'wx' });
+      return 'created';
+    } catch (e) {
+      if (codeOf(e) !== 'EEXIST') throw e;
+    }
+    const s = await stat(at);
+    if (s.isDirectory()) throw new Error(`${path} is a folder`);
+    if (s.size > 0 || bytes.length === 0) return 'exists';
+    await writeFile(at, bytes, { flag: 'r+' });
+    return 'created';
+  }
+
   return {
     async readText(path) {
       const at = full(path);
@@ -56,24 +75,23 @@ export function nodeFs(root: string): Fs {
       return [...new Set(names.map((n) => n.normalize('NFC')))].sort();
     },
 
-    async create(path, text) {
-      const at = full(path);
-      if (path === ROOT) throw new Error('the folder itself is not a file');
-      // Before mkdir, which would otherwise make a deleted root again.
-      await rootAnswers();
-      await mkdir(dirname(at), { recursive: true });
-      try {
-        await writeFile(at, text, { flag: 'wx' });
-        return 'created';
-      } catch (e) {
-        if (codeOf(e) !== 'EEXIST') throw e;
-      }
-      const s = await stat(at);
-      if (s.isDirectory()) throw new Error(`${path} is a folder`);
-      if (s.size > 0 || text === '') return 'exists';
-      await writeFile(at, text, { flag: 'r+' });
-      return 'created';
+    create(path, text) {
+      return createBytes(path, new TextEncoder().encode(text));
     },
+
+    async readBytes(path) {
+      const at = full(path);
+      try {
+        // Copied into this realm's Uint8Array: under jest, node:fs answers with another realm's.
+        return Uint8Array.from(await readFile(at));
+      } catch (e) {
+        if (!absent(e)) throw e;
+        await rootAnswers();
+        return null;
+      }
+    },
+
+    createBytes,
 
     async write(path, text) {
       const at = full(path);

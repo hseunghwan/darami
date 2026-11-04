@@ -225,5 +225,5 @@ test("the committed view reads a live job's paths as they were, hides what it ma
   assert.equal(await view.readText(old), 'changed\n');
   // @ts-expect-error the committed view has no write
   assert.equal(view.write, undefined);
-  assert.deepEqual(Object.keys(view).sort(), ['list', 'listTree', 'readText']);
+  assert.deepEqual(Object.keys(view).sort(), ['list', 'listTree', 'readBytes', 'readText']);
 });
