@@ -23,7 +23,7 @@
  */
 
 import { appliedPages, failureOutcome, INTERRUPTED_REASON, withReviewNote } from '../core/filing';
-import type { Fs } from '../core/fs';
+import type { Fs, ReadFs } from '../core/fs';
 import { paths, type WikiPath } from '../core/layout';
 import { appendLine, parseLedger, type JobKind, type Ledger, type NewOutcome, type VerdictId } from '../core/ledger';
 import { describeProblems, type Change, type Problem } from '../core/pages';
@@ -100,6 +100,13 @@ export type Journal = {
   recover(domain?: DomainName): Promise<void>;
   /** Ingest jobs the journal holds open, live or stale. */
   running(): Promise<ReadonlyMap<DomainName, string>>;
+  /**
+   * The folder as of the last commit, for readers outside every lane. A path a live transaction
+   * wrote reads as it was before it, a file one made is absent from reads and listings, and every
+   * other path reads through. Built with no method that writes. A row a kill or a throw left reads
+   * through until recovery settles it.
+   */
+  committedFs(): ReadFs;
 };
 
 type Mem = {
@@ -116,6 +123,14 @@ export function openJournal(deps: JournalDeps): Journal {
   const { fs, store } = deps;
   const live = new Set<string>();
   const ledgerLane = lanes<DomainName>();
+  /** The memories of live transactions: their before-images are what the folder held at the last commit. */
+  const open = new Set<Mem>();
+
+  function committed(): ReadonlyMap<WikiPath, string | null> {
+    const out = new Map<WikiPath, string | null>();
+    for (const m of open) for (const [path, b] of m.before) out.set(path, b);
+    return out;
+  }
 
   const inLedger = <T,>(d: DomainName, fn: () => Promise<T>): Promise<T> =>
     ledgerLane(d)(async () => {
@@ -202,10 +217,12 @@ export function openJournal(deps: JournalDeps): Journal {
         live.add(key);
       });
       const mem: Mem = { domain, slot: 'job', before: new Map(), wrote: new Map() };
-      let open = true;
+      open.add(mem);
+      let held = true;
       const release = () => {
-        if (open) live.delete(key);
-        open = false;
+        if (held) live.delete(key);
+        held = false;
+        open.delete(mem);
       };
       const close = async () => {
         await store.end(domain, 'job');
@@ -273,11 +290,14 @@ export function openJournal(deps: JournalDeps): Journal {
         const key = keyOf(domain, 'ledger');
         await store.begin(domain, 'ledger', null);
         live.add(key);
+        const mem: Mem = { domain, slot: 'ledger', before: new Map(), wrote: new Map() };
+        open.add(mem);
         try {
-          await writeLine({ domain, slot: 'ledger', before: new Map(), wrote: new Map() }, draft, w);
+          await writeLine(mem, draft, w);
           await store.end(domain, 'ledger');
         } finally {
           live.delete(key);
+          open.delete(mem);
         }
         return true;
       });
@@ -291,5 +311,20 @@ export function openJournal(deps: JournalDeps): Journal {
     async running() {
       return new Map((await store.heads()).filter((h) => h.slot === 'job' && h.job?.kind === 'ingest').map((h) => [h.domain, h.job!.id] as const));
     },
+
+    committedFs: () => ({
+      async readText(path) {
+        const c = committed();
+        return c.has(path) ? c.get(path)! : fs.readText(path);
+      },
+      async list(dir) {
+        const c = committed();
+        return (await fs.list(dir)).filter((name) => c.get(`${dir === '' ? '' : `${dir}/`}${name}` as WikiPath) !== null);
+      },
+      async listTree(dir) {
+        const c = committed();
+        return (await fs.listTree(dir)).filter((path) => c.get(path) !== null);
+      },
+    }),
   };
 }
