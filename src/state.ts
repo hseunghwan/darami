@@ -1,10 +1,11 @@
 import * as Network from 'expo-network';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
+import type { ChatId } from './core/chat';
 import type { MachineFacts } from './core/config';
 import { FolderUnreachable } from './core/fs';
-import { parseMemo } from './core/pages';
-import type { DomainName, MemoId } from './core/types';
+import { parseMemo, type PageRef } from './core/pages';
+import type { ChatTarget, DomainName, MemoId } from './core/types';
 import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
 import { phoneModel } from './agent/codex';
 import { MODEL_PROFILES } from './agent/model';
@@ -13,12 +14,15 @@ import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session'
 import { pickSafTree, safFs } from './fs/saf';
 import { parseSafTree, type SafTree } from './fs/saf-uri';
 import { buildMemoRequest, type GeoFix } from './lib/capture';
+import { chatLogLine, type Asked, type Saved } from './lib/chats';
 import { kv } from './lib/db';
 import { sweepPending } from './lib/files';
 import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
-import { openEngine, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type ReleaseResult } from './jobs/engine';
+import {
+  openEngine, type ChatProgress, type ChatSummary, type ChatView, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type PageView, type Question, type ReleaseResult, type TurnRef,
+} from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteChats, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
@@ -219,7 +223,7 @@ export const runJobs = (): Promise<void> => runner.trigger();
 export type Capture = {
   readonly id: string;
   readonly text: string;
-  readonly source: 'typed' | 'share' | 'selection';
+  readonly source: 'typed' | 'share' | 'selection' | 'chat';
   readonly domainHint: string | null;
   readonly location: GeoFix | null;
 };
@@ -313,6 +317,86 @@ export function useMemoDetail(id: string): MemoDetailState {
     })();
     return () => void (live = false);
   }, [id, row, ready]);
+  return state;
+}
+
+/**
+ * One question. A chat that finds the login spent marks it refused, as a runner login pause does,
+ * so the gate and Settings show "log in again". A chat failure never touches the runner's schedule.
+ */
+export async function askWiki(q: Question, onProgress: (p: ChatProgress) => void, signal: AbortSignal): Promise<Asked> {
+  const start = Date.now();
+  let firstTextMs: number | null = null;
+  const progress = (p: ChatProgress) => {
+    if (firstTextMs === null && p.kind === 'text') firstTextMs = Date.now() - start;
+    onProgress(p);
+  };
+  let r: Asked;
+  try {
+    const engine = await usableEngine();
+    r = engine ? await engine.chats.ask(q, progress, signal) : { kind: 'no-wiki' };
+  } catch (e) {
+    if (e instanceof FolderUnreachable) void recheckFolder();
+    r = e instanceof FolderUnreachable ? { kind: 'unreachable' } : { kind: 'error', message: e instanceof Error ? e.message : String(e) };
+  }
+  if (r.kind === 'failed' && r.turn.failure === 'login') {
+    refused = true;
+    void readLogin();
+  }
+  // The emulator run reads each question's outcome from logcat.
+  if (__DEV__) console.log(chatLogLine(r, { target: q.target, ms: Date.now() - start, firstTextMs }));
+  return r;
+}
+
+/** The file-answer job needs no model, so a staged answer is filed even during a usage-limit pause. */
+export async function saveAnswer(turn: TurnRef): Promise<Saved> {
+  try {
+    const engine = await usableEngine();
+    if (!engine) return { kind: 'no-wiki' };
+    const r = await engine.saveAnswer(turn);
+    if (r.kind === 'staged') void runner.trigger();
+    return r;
+  } catch (e) {
+    if (e instanceof FolderUnreachable) void recheckFolder();
+    return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** The question as a memo, with the chat's domain as the hint. Its id is fixed per turn, so a second tap changes nothing. */
+export const rememberQuestion = (turn: { readonly memo: MemoId; readonly question: string }, target: ChatTarget): Promise<Filed> =>
+  fileMemo({ id: turn.memo, text: turn.question, source: 'chat', domainHint: target.kind === 'domain' ? target.domain : null, location: null });
+
+/** null when there is no wiki or it did not answer. */
+export async function pastChats(): Promise<readonly ChatSummary[] | null> {
+  const engine = await usableEngine().catch(() => null);
+  return engine ? engine.chats.list().catch(() => null) : null;
+}
+
+export async function openChat(id: ChatId): Promise<ChatView | null> {
+  const engine = await usableEngine().catch(() => null);
+  return engine ? engine.chats.open(id).catch(() => null) : null;
+}
+
+export async function deleteChat(id: ChatId): Promise<boolean> {
+  const engine = await usableEngine().catch(() => null);
+  return engine ? engine.chats.remove(id).then(() => true, () => false) : false;
+}
+
+export type PageState = { readonly kind: 'loading' } | { readonly kind: 'missing' } | { readonly kind: 'shown'; readonly page: PageView };
+
+/** A wiki page for the viewer, read again whenever the memo book changes, so a commit that rewrites it shows. */
+export function usePage(ref: PageRef): PageState {
+  const book = useApp((a) => a.book);
+  const [state, setState] = useState<PageState>({ kind: 'loading' });
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const engine = await usableEngine().catch(() => null);
+      const page = engine ? await engine.page(ref).catch(() => null) : null;
+      if (live) setState(page ? { kind: 'shown', page } : { kind: 'missing' });
+    })();
+    return () => void (live = false);
+  }, [ref.domain, ref.page, book]);
   return state;
 }
 

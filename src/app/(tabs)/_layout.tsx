@@ -8,9 +8,9 @@ import { Icon, type IconName } from '../../ui/icon';
 import { useTheme } from '../../ui/theme';
 import { copy } from '../../text';
 
-/** The chat tab comes back with P5, on the local engine. */
 const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: copy.tabs.index, icon: 'pencil' },
+  chat: { label: copy.tabs.chat, icon: 'chat' },
   activity: { label: copy.tabs.activity, icon: 'history' },
 };
 
@@ -48,6 +48,7 @@ export default function TabsLayout() {
   return (
     <Tabs tabBar={(props) => <BottomNav {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" />
+      <Tabs.Screen name="chat" />
       <Tabs.Screen name="activity" />
     </Tabs>
   );

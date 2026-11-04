@@ -9,6 +9,7 @@ import { confirmMemo, retryMemo, useMemoDetail } from '../../state';
 import { useNow } from '../../ui/hooks';
 import { Icon } from '../../ui/icon';
 import { Card, FailureLine, Header, Notice, PrimaryButton, Screen, SectionTitle, SmallButton } from '../../ui/parts';
+import { openPage } from '../../ui/spans';
 import { useTheme, type Theme } from '../../ui/theme';
 import { copy } from '../../text';
 
@@ -165,15 +166,22 @@ export default function MemoDetailScreen() {
           <View style={{ gap: 8 }}>
             <SectionTitle>{copy.detail.pages}</SectionTitle>
             <Card>
-              {memo.pages.map((p, i) => (
-                <View key={p.path} style={[st.page, i < memo.pages.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line }]}>
-                  <Icon name="file" size={16} color={t.faint} />
-                  <Text style={{ flex: 1, color: t.link, fontSize: 14 }}>{p.path}</Text>
-                  <Text style={{ color: t.faint, fontSize: 12 }}>
-                    {[p.type, p.change === 'created' ? copy.detail.created : p.change === 'modified' ? copy.detail.modified : null].filter(Boolean).join(' · ')}
-                  </Text>
-                </View>
-              ))}
+              {memo.pages.map((p, i) => {
+                const meta = [p.type, p.change === 'created' ? copy.detail.created : p.change === 'modified' ? copy.detail.modified : null].filter(Boolean).join(' · ');
+                return (
+                  <Pressable
+                    key={p.path}
+                    accessibilityRole="button"
+                    accessibilityLabel={[p.path, meta].filter(Boolean).join(' ')}
+                    onPress={() => openPage({ domain: at.domain, page: p.path })}
+                    style={[st.page, i < memo.pages.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line }]}
+                  >
+                    <Icon name="file" size={16} color={t.faint} />
+                    <Text style={{ flex: 1, color: t.link, fontSize: 14 }}>{p.path}</Text>
+                    <Text style={{ color: t.faint, fontSize: 12 }}>{meta}</Text>
+                  </Pressable>
+                );
+              })}
             </Card>
             <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18, marginHorizontal: 4, marginTop: 4 }}>{copy.detail.rawKept(at.domain)}</Text>
           </View>
