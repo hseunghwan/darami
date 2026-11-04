@@ -22,20 +22,23 @@ import { CONFIG_FILE, type ConfigParse, type ConfigProblem, type MachineFacts } 
 import { dayIn } from '../core/filing';
 import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
-import type { NewMemo, Problem, Routing } from '../core/pages';
+import type { NewMemo, PageRef, Problem, Routing } from '../core/pages';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
 import { readConfig } from '../core/wiki';
-import { LIMITS, type AgentLimits } from '../agent/loop';
+import { LIMITS, type AgentLimits, type ChatLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
 import { openBook, type Book, type BookParts, type BookStore, type Pass } from './book';
+import { chatService, type Chats, type ChatStore, type PageView } from './chat';
 import { domainJobs } from './domain';
 import { lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
 
 export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow, Pass } from './book';
+export type { AnsweredTurn, AskResult, AskTrace, ChatFailure, ChatStore, ChatSummary, ChatTurn, ChatView, FailedTurn, PageView, Question } from './chat';
+export type { ChatProgress } from '../agent/loop';
 export type { Finished, Placement } from '../core/places';
 export type { FailureCode, MemoFailure } from '../core/filing';
 
@@ -99,6 +102,10 @@ export type Engine = {
   domains(): Promise<readonly DomainName[] | null>;
   /** The memos as the screens show them, kept by the engine's own reads and writes. */
   readonly book: Book;
+  /** Chat with the wiki: ask, list, open, remove. Reads the folder as of the last commit and writes none of it. */
+  readonly chats: Chats;
+  /** A wiki page for the page viewer, as of the last commit. null when there is no such page. */
+  page(ref: PageRef): Promise<PageView | null>;
 };
 
 export type EngineDeps = {
@@ -110,6 +117,9 @@ export type EngineDeps = {
   readonly machine: MachineFacts;
   readonly now: () => Date;
   readonly limits?: AgentLimits;
+  /** sqliteChats(folder) on the phone, memoryChats() under jest. */
+  readonly chats: ChatStore;
+  readonly chatLimits?: ChatLimits;
   readonly onEvent?: (e: EngineEvent) => void;
 };
 
@@ -167,6 +177,7 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
   const memos = memoTransitions(ctx);
   const jobs = domainJobs(ctx, memos.finishMoves);
   await jobs.init();
+  const chat = chatService({ committed: journal.committedFs(), store: deps.chats, model: deps.model, config, now: deps.now, limits: deps.chatLimits });
   return {
     accept: memos.accept,
     routeNext: memos.routeNext,
@@ -185,5 +196,7 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
       memo: (id) => ctx.memoLane(() => book.detail(id)),
       refresh: memos.refresh,
     },
+    chats: chat.chats,
+    page: chat.page,
   };
 }

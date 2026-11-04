@@ -268,15 +268,15 @@ export function memoryChats(): ChatStore {
       if (ts.some((x) => x.n === t.n)) throw new Error(`chat turn ${t.chat} ${t.n} exists`);
       turns.set(t.chat, [...ts, t].sort((a, b) => a.n - b.n));
     },
-    async remove(chat) {
+    async forget(chat) {
       turns.delete(chat);
     },
   };
 }
 
 /** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
-export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook()): Promise<Engine> =>
-  openEngine({ fs, journal: store, book, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
+export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook(), chats: ChatStore = memoryChats()): Promise<Engine> =>
+  openEngine({ fs, journal: store, book, chats, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
 
 /** The next book a watcher hears that `ok` accepts, or this one. Reading memo files the book has not seen needs a watcher. */
 export function bookWhere(e: Engine, ok: (b: MemoBook) => boolean): Promise<MemoBook> {
