@@ -205,10 +205,17 @@ Checked on 2026-11-05.
 
 - README.md and README.ko.md describe the app on its own: install, setup, memos, sharing, photos and links, held and failed memos, the waiting badges, Ask, the folder layout, privacy, limits, building, and the personal-use note. A script matched all 40 on-screen labels the READMEs quote against src/text/en.ts and ko.ts.
 - CI built a release APK from `main` at 0a703c6 in 32 minutes: `darami-0.1.0-0a703c6-debug-signed.apk`, 66 MB, with arm64-v8a and x86_64. Its `.sha256` matched the download. The repository has no signing secrets yet, so the APK carries the debug key.
-- The APK installed on a clean Android 15 emulator that never had darami, and opened on the login step that the README describes. The rest of the clean-phone walkthrough waits for a ChatGPT device-code approval. Two codes expired unapproved.
+- The APK installed on a clean Android 15 emulator that never had darami. Following the README worked from start to finish:
+  1. The device-code login was approved in a browser.
+  2. An empty `Documents/mywiki` got the en preset with three domains.
+  3. The first memo was filed in under a minute as `learning/wiki/B-tree.md`, and the ledger gained one line.
 - No release exists yet. Tagging `v*` makes CI attach the APK and its checksum to a GitHub release.
-- The starter `dotoriwiki.yaml` in both presets still carries dotoriwiki's comments about the gateway and `models.json`. The README warns about them.
+- The starter `dotoriwiki.yaml` comments now describe darami. Only comment lines changed, and the replay test starts from the fixture's own copy of that file.
 - The author's dotoriwiki wiki is not moved. darami is a separate app with its own wiki (decided with the user on 2026-11-05).
+- Settings picks the model and effort for Filing (classify and ingest) and for Ask. The list comes from `GET /backend-api/codex/models?client_version=…`. Without `client_version` the endpoint answers 422 `client_version: Field required`.
+  - On a Plus plan it listed 8 models: gpt-6.1-sol, gpt-6-astra, gpt-6.1-terra, gpt-6-sol, gpt-6-luna, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna.
+  - Each model has its own efforts. gpt-6-sol offers low, medium (its default), and high.
+- With Filing on gpt-6-sol at high effort, the trip-planning memo was filed as `journal/wiki/people/Sister.md`. P3's run on gpt-6-luna at medium had marked it `unchanged`.
 - Still open:
   - opening the same folder in Obsidian on the phone (Done when 5)
 
