@@ -4,6 +4,7 @@
  * construction. Pure JS: jest and Hermes run this same file, so it is not a port and has no fake.
  */
 
+import './navigator';
 import exifr from 'exifr';
 import type { ExifTags } from '../core/photos';
 
