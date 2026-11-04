@@ -24,6 +24,7 @@ import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
 import type { NewMemo, PageRef, Problem, Routing } from '../core/pages';
 import type { PhotoTools } from '../core/photos';
+import type { FetchSource } from '../core/sources';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
@@ -140,6 +141,8 @@ export type EngineDeps = {
   readonly onEvent?: (e: EngineEvent) => void;
   /** phonePhotoTools on the phone, copyingTools() under jest. */
   readonly photos: PhotoTools;
+  /** articleFetcher(…) on the phone, fakeFetchSource(…) under jest. */
+  readonly fetchSource: FetchSource;
 };
 
 /** What memos.ts and domain.ts share. `fs` is the book's, so every read and write reaches the book. */
@@ -159,6 +162,7 @@ export type Ctx = {
   readonly router: Lane;
   readonly jobLane: (d: DomainName) => Lane;
   readonly photos: PhotoFiles;
+  readonly fetchSource: FetchSource;
 };
 
 const NO_CONFIG: ConfigParse = { ok: false, problems: [{ key: CONFIG_FILE, problem: 'does not exist', fix: 'restore it, or pick the wiki folder again' }] };
@@ -206,6 +210,7 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     router: lane(),
     jobLane: lanes<DomainName>(),
     photos,
+    fetchSource: deps.fetchSource,
   };
   await journal.recover();
   await photos.sweep();

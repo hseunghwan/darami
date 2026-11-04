@@ -86,11 +86,11 @@ function packagesLoadedBy(path: string, byPath: ReadonlyMap<string, Source>): Se
   return out;
 }
 
-test('src/agent and src/jobs load under jest: no expo or react-native, at any depth, outside the two files that bind the phone', () => {
+test('src/agent, src/jobs, src/links, and src/media load under jest: no expo or react-native, at any depth, outside the three files that bind the phone', () => {
   const all = sources(SRC);
   const byPath = new Map(all.map((s) => [withoutExt(s.path), s]));
-  const bound = new Set([join(SRC, 'agent', 'codex.ts'), join(SRC, 'jobs', 'sqlite.ts')]);
-  const engine = ['agent', 'jobs'].map((d) => join(SRC, d)).filter(existsSync).flatMap((d) => sources(d)).filter((s) => !bound.has(s.path));
+  const bound = new Set([join(SRC, 'agent', 'codex.ts'), join(SRC, 'jobs', 'sqlite.ts'), join(SRC, 'media', 'phone.ts')]);
+  const engine = ['agent', 'jobs', 'links', 'media'].map((d) => join(SRC, d)).filter(existsSync).flatMap((d) => sources(d)).filter((s) => !bound.has(s.path));
   assert.ok(engine.some((s) => name(s.path) === join('jobs', 'transaction.ts')), 'the scan sees the jobs');
   const leaks = engine.flatMap((s) => [...packagesLoadedBy(s.path, byPath)].filter((p) => /^(expo|react-native|react$)/.test(p)).map((p) => `${name(s.path)}: ${p}`));
   assert.deepEqual(leaks, []);

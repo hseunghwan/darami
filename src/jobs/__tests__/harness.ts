@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Fs } from '../../core/fs';
 import type { JpegSpec, PhotoTools } from '../../core/photos';
+import type { FetchedSource, FetchSource, LinkResult } from '../../core/sources';
 import type { WikiPath } from '../../core/layout';
 import { presetFiles } from '../../core/presets';
 import type { DomainName, Locale } from '../../core/types';
@@ -313,13 +314,29 @@ export function refusingTools(ok = 0): PhotoTools {
   return { sha256: copyingTools().sha256, jpeg: async (b) => (++calls <= ok ? Uint8Array.from(b) : null) };
 }
 
-export type Ports = { readonly photos?: PhotoTools; readonly now?: () => Date };
+/** url → entry, every call recorded, so a test sees a sidecar fetched once in a memo's life. */
+export function fakeFetchSource(answer: (url: string) => FetchedSource | 'offline'): FetchSource & { readonly calls: string[] } {
+  const calls: string[] = [];
+  const f = async (url: string): Promise<LinkResult> => {
+    calls.push(url);
+    const a = answer(url);
+    return a === 'offline' ? { status: 'offline' } : a;
+  };
+  return Object.assign(f, { calls });
+}
+
+/** What dotoriwiki's fixture script answered for every link. */
+export const fixtureFetch = () =>
+  fakeFetchSource((url) => (url.includes('dead') ? { kind: 'article', status: 'failed', title: null, detail: 'HTTP 404' } : { kind: 'article', status: 'ok', title: `제목 ${url}`, text: `본문 ${url}` }));
+
+export type Ports = { readonly photos?: PhotoTools; readonly fetchSource?: FetchSource; readonly now?: () => Date };
 
 /** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
 export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook(), chats: ChatStore = memoryChats(), ports: Ports = {}): Promise<Engine> =>
   openEngine({
     fs, journal: store, book, chats, model, machine: { modelProfiles: MODEL_PROFILES }, now: ports.now ?? FIXTURE_NOW, onEvent: (e) => events.push(e),
     photos: ports.photos ?? copyingTools(),
+    fetchSource: ports.fetchSource ?? fixtureFetch(),
   });
 
 /** The next book a watcher hears that `ok` accepts, or this one. Reading memo files the book has not seen needs a watcher. */

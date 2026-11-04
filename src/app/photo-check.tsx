@@ -2,9 +2,10 @@
  * darami://photo-check, dev builds only. Runs the phone's own photo code, which jest cannot
  * reach, on the samples in src/media/samples.gen.ts: exifr on Hermes against made-by-dotoriwiki's
  * record, expo-crypto, and the expo-image-manipulator copy (orientation, the cap, never enlarging,
- * each format). Every line goes to console.log with a PHOTOCHECK prefix for logcat, ending with
- * `PHOTOCHECK done <passed>/<total>`. The Orientation 6 copy is shown on screen, red on top when
- * upright, and saved in the app's cache, whose path the log names for adb pull.
+ * each format). Then the link reader on Hermes: the EUC-KR decoder, and linkedom with Readability
+ * timed on a page of about 260 KB. Every line goes to console.log with a PHOTOCHECK prefix for
+ * logcat, ending with `PHOTOCHECK done <passed>/<total>`. The Orientation 6 copy is shown on
+ * screen, red on top when upright, and saved in the app's cache, whose path the log names.
  */
 
 import { File, Paths } from 'expo-file-system';
@@ -13,6 +14,8 @@ import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { COPY_JPEG, jpegSize, MODEL_JPEG, sniffPhoto } from '../core/photos';
+import { decodeEucKr, decodeHtml } from '../links/charset';
+import { readableText } from '../links/readable';
 import { readExifTags } from '../media/exif';
 import { phonePhotoTools } from '../media/phone';
 import { FIXTURE_MEMO, fixtureMemoFile, fromBase64, SAMPLES } from '../media/samples';
@@ -141,6 +144,29 @@ const CASES: readonly Case[] = [
       const small = await jpeg(copy!, MODEL_JPEG);
       check(sizeOf(small) === '1024×768', `came back ${sizeOf(small)}`);
       say(`${small!.length} bytes, data URL about ${Math.ceil(small!.length / 3) * 4 + 23} characters, in ${Date.now() - t0} ms`);
+    },
+  },
+  {
+    name: 'EUC-KR on Hermes: a windows-949 page decodes whole, a syllable strict KS X 1001 lacks included',
+    run: async () => {
+      const bytes = Uint8Array.from([0x81, 0x41, 0x20, 0x8c, 0x63, 0xb9, 0xe6, 0xb0, 0xa2, 0xc7, 0xcf, 0x2c, 0x20, 0xc7, 0xd1, 0xb1, 0xdb, 0x20, 0x52, 0x41, 0x47, 0x20, 0xc3, 0xbb, 0xc5, 0xa9, 0x20, 0x35, 0x31, 0x32]);
+      const want = '갂 똠방각하, 한글 RAG 청크 512';
+      check(decodeEucKr(bytes) === want, `got ${JSON.stringify(decodeEucKr(bytes))}`);
+      const page = decodeHtml('text/html; charset=ks_c_5601-1987', bytes);
+      check(page.kind === 'text' && page.text === want, JSON.stringify(page));
+    },
+  },
+  {
+    name: 'reader on Hermes: linkedom and Readability read a page of about 260 KB, timed, the JS thread blocked meanwhile',
+    run: async (say) => {
+      const para = '<p>The queue lives in a single table, and every worker claims a row with one UPDATE statement. 도토리는 겨울에 다시 파낸다.</p>\n';
+      const noise = '<script>window.__state = {"a": [1, 2, 3]};</script><style>.x { color: red }</style><nav><a href="/">Home</a></nav>\n';
+      const html = `<html><head><title>Write-ahead logging</title></head><body>${noise.repeat(400)}<article><h1>Write-ahead logging</h1>${para.repeat(1900)}</article></body></html>`;
+      const t0 = Date.now();
+      const read = readableText(html);
+      const ms = Date.now() - t0;
+      check(read !== null && read.title === 'Write-ahead logging' && read.text.includes('UPDATE statement. 도토리는'), JSON.stringify(read?.title));
+      say(`${Math.round(html.length / 1024)} KB of HTML to ${read!.text.length} characters in ${ms} ms`);
     },
   },
 ];
