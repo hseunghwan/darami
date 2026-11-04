@@ -151,12 +151,12 @@ describe.each(chatStores)('the %s chat store', (_, make) => {
     assert.deepEqual(await s.turns(parseChatId('44444444-4444-4444-8444-444444444444')!), []);
   });
 
-  test('a turn number is taken once, and removing a chat removes only its turns', async () => {
+  test('a turn number is taken once, and forgetting a chat removes only its turns', async () => {
     const s = make();
     await s.add(asked(C1, 0, '2026-10-29T00:00:00.000Z'));
     await s.add(asked(C2, 0, '2026-10-29T00:00:00.000Z'));
     await assert.rejects(s.add(asked(C1, 0, '2026-10-29T00:05:00.000Z')));
-    await s.remove(C1);
+    await s.forget(C1);
     assert.deepEqual(await s.turns(C1), []);
     assert.deepEqual((await s.chats()).map((c) => c.chat), [C2]);
   });

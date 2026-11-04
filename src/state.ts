@@ -20,7 +20,7 @@ import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
 import { openEngine, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type ReleaseResult } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
-import { sqliteBook, sqliteJournal } from './jobs/sqlite';
+import { sqliteBook, sqliteChats, sqliteJournal } from './jobs/sqlite';
 import { locale } from './text';
 
 export type ThemePref = 'system' | 'dark' | 'light';
@@ -111,6 +111,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       fs: safFs(folder.tree),
       journal: sqliteJournal(folder.tree.uri),
       book: sqliteBook(folder.tree.uri),
+      chats: sqliteChats(folder.tree.uri),
       model: phoneModel,
       machine: MACHINE,
       now: () => new Date(),

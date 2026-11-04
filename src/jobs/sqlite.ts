@@ -273,7 +273,7 @@ export function sqliteChats(folder: string, open: () => Promise<Sql> = appDb): C
         o.kind === 'answered' ? o.answer : null, o.kind === 'answered' ? JSON.stringify(o.cited) : null, o.kind === 'failed' ? o.failure : null,
       );
     },
-    async remove(chat) {
+    async forget(chat) {
       await (await db()).runAsync('DELETE FROM chat_turn WHERE folder = ? AND chat = ?', folder, chat);
     },
   };

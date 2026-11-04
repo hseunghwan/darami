@@ -126,3 +126,13 @@ test('only engine.ts touches the Fs and journal the engine was given, so every r
   const leaks = jobs.filter((s) => s.path !== join(SRC, 'jobs', 'engine.ts') && /\bdeps\.(fs|journal)\b/.test(s.text)).map((s) => name(s.path));
   assert.deepEqual(leaks, []);
 });
+
+test('a chat reads through the committed view only: jobs/chat.ts calls nothing that writes and imports no module that writes the folder', () => {
+  const jobs = join(SRC, 'jobs');
+  const chat = sources(jobs).find((s) => s.path === join(jobs, 'chat.ts'));
+  assert.ok(chat, 'the scan sees the chat');
+  assert.deepEqual(chat.text.match(/\.(write|create|remove|append)\(/g) ?? [], []);
+  const writers = ['transaction', 'memos', 'domain', 'book', 'engine'].map((f) => join(jobs, f));
+  const leaks = chat.imports.filter((i) => i.to !== null && (writers.includes(i.to) || i.to.startsWith(join(SRC, 'fs') + '/'))).map((i) => i.spec);
+  assert.deepEqual(leaks, []);
+});
