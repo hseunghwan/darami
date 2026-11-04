@@ -171,6 +171,34 @@ Checked on 2026-11-04 on the Android 16 emulator, in the kept folder `p4`, with 
   - The wrap-up turn sends `tools: []` while its input still holds function calls. It has not run against the endpoint, because no question ran out of turns.
   - A preamble in a tool turn can flash before the "Reading the wiki" note.
 
+## What P6 found
+
+Checked on 2026-11-05 on the Android 16 emulator, after one native rebuild of the dev client (2 min 11 s on the Windows machine).
+
+- A memo from the memo tab had a 4032×3024 gallery photo with Orientation 6 and GPS, plus a link. It was filed into `learning` as an update to `SQLite WAL mode.md`, and the page embeds `![[<id>-1.jpg]]`. The model described the photo as red on top and blue below. That matches the upright copy, so the image reached the model.
+- The memo record matched the sample:
+  - sha256 and bytes of the untouched original
+  - width 3024 and height 4032, swapped for Orientation 6
+  - `taken_at: 2026-11-05T10:00:00+09:00`
+  - GPS rounded to 5 places with `from: exif`
+  - device samsung SM-S928N, and camera null
+- `_attachments/<id>-1.jpg` came out 1536×2048 with red on top. The sidecar fetched the Wikipedia article as `status: ok`, with its title and text.
+- `darami://photo-check` passed 11 of 11:
+  - exifr on Hermes rebuilds the fixture's photo memo byte for byte, and expo-crypto gives the same digests
+  - Orientations 3, 6, and 8 come out upright
+  - a photo is never enlarged, and the long edge is exactly 2048
+  - PNG, WebP, and HEIC decode
+  - the model copy is 1024×768, about 7 KB
+  - EUC-KR decodes
+  - Readability read 260 KB of HTML in 1.5 s, blocking the JS thread
+- `darami://fs-check` passed 44 of 44, including the bytes cases.
+- exifr does not load on Hermes as published. It calls `navigator.userAgent.includes`, and React Native has no userAgent. It also has an `import()` of a variable, which Hermes cannot parse, and Metro refuses its `require()` of a variable in app source. Its legacy build avoids `import()`, but its async code is broken.
+
+  darami gives `navigator` an empty userAgent and vendors the full bundle with that loader removed. `scripts/vendor-exifr.ts` makes the copy, and a test pins it to the installed version.
+- Photos live in `_originals/` and `_attachments/` at the wiki root, as dotoriwiki keeps them, each folder with a `.nomedia` so the phone's gallery does not show them twice.
+- A short memo with a photo and a link, sent to `someday`, was stored correctly but ingested as `nothing to file`. `gpt-6-luna` at medium effort has now skipped three thin memos. Whether ingest should run on a stronger model is still open.
+- The emulator's memos record `tz: Asia/Seoul` with `captured_at` at offset `+00:00`, because the emulator's own zone is GMT. That has not been checked on a phone set to Seoul.
+
 ## Shape
 
 ```
@@ -200,7 +228,7 @@ Each phase ends in a check. A later phase starts only after the earlier one pass
 | P3 | The agent loop and the job queue: classify, hold, ingest with the ledger line, retries, and the unavailable states for rate limits and expired logins. | Unit tests with a fake model, including the confinement case. On the emulator, a typed memo lands in its domain's `wiki/` with one `log.md` line. |
 | P4 | Rewire the screens: compose, activity, memo detail, held, and settings read the local queue and the wiki. Delete pairing, the outbox, and the gateway client. Settings show the login and the folder. | App tests pass. On the emulator the whole flow works with the network on, and a memo sent offline waits and is filed when the network returns. |
 | P5 | Chat with read-only tools and streamed answers, and filing an answer through the ingest path. | A chat answer cites wiki pages and changes no file. A filed answer shows up as a page and a ledger line. |
-| P6 | Photos: shrink to 2048 px with `expo-image-manipulator`, store them in `raw/`, and send them to the model as images. Links: fetch an article, extract its text, and attach it to the memo. | A memo with a photo and a link is filed with both. |
+| P6 | Photos: shrink to 2048 px with `expo-image-manipulator`, store the original in `_originals/` and the copy in `_attachments/` as dotoriwiki does, and send them to the model as images. Links: fetch an article, extract its text, and attach it to the memo. | A memo with a photo and a link is filed with both. |
 | P7 | Rewrite the README in English and Korean around the app and its Codex login. Move the author's live wiki to the phone folder. | CI builds a release APK. The README walkthrough works on a clean phone. |
 
 P0 decides whether the plan stands, so nothing else starts before it passes. P1 keeps the on-disk format, `dotoriwiki.yaml` included, so a wiki dotoriwiki made and a wiki darami made stay the same thing.
