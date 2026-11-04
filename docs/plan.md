@@ -127,6 +127,29 @@ Checked on 2026-11-03 under jest and on the Android 16 emulator. The wiki on the
   - search reads every page through SAF
   - journal rows of a folder that is no longer kept are never removed
 
+## What P4 found
+
+Checked on 2026-11-04 on the Android 16 emulator, after `pm clear`, with the dev build on Metro.
+
+- A fresh install now goes through these steps:
+  1. It logged in with a ChatGPT device code that the user approved in a browser.
+  2. It picked an empty folder and wrote the en preset.
+  3. A memo typed in the memo tab was filed as `SQLite WAL mode.md`, and `learning/wiki/log.md` gained one line.
+
+  That is Done when 1.
+- The classifier held an ambiguous memo, `blue thing from that day, maybe`, in `journal/hold/` with the guess "Probably journal". Tapping Correct in Activity moved it to `raw/`, and it was filed (`nothing to file`). That is Done when 2.
+- A memo sent in airplane mode showed `Received`, with the badge `Offline · 1 waiting`, and stayed in `inbox/`. Within 50 seconds of turning airplane mode off, it was filed as `HTTP3 and QUIC.md` and the badge cleared.
+- After a force-stop, the app opened on the memo tab, still logged in, with the recent rows. Switching to a copy of `made-by-dotoriwiki` in Settings showed that wiki's memos, states, pages, and Korean domain chips.
+- Screens read `engine.book`. It is a read model the engine updates as its own reads and writes pass through, so screens cost no SAF reads of their own. Memo headers and each commit's time and page changes live in SQLite. A wiki dotoriwiki made shows only the ledger date and pages with no created or modified label.
+- One idle runner pass on the ko preset fell from 28 lists and 12 ledger reads to 10 lists and 3 ledger reads, because the pass now shares one folder snapshot. `raw/` is still listed once per domain per pass, and `list()` is synchronous at about 4.5 ms per entry. That is about 1 s of blocking at 200 memos, estimated rather than measured.
+- Measured on the emulator:
+  - `File.info()` returns `modificationTime` on SAF in about 31 ms.
+  - `Directory.info()` walks its subtree, taking 232 ms for 8 files.
+
+  Neither is used for staleness checks.
+- On a Windows checkout, `npm ci` fails with EPERM while an old Metro's `dotslash.exe` still runs. Stop it first.
+- Removing `expo-camera` needs a new native build for the APK. The installed dev client ran the new JavaScript without one.
+
 ## Shape
 
 ```
