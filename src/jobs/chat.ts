@@ -16,7 +16,7 @@ import {
 import type { ConfigParse, ConfigProblem } from '../core/config';
 import type { ReadFs } from '../core/fs';
 import { chatPlaceOf, paths, resolvePath, ROOT, type WikiPath } from '../core/layout';
-import { indexEntries, pageMeta, pageRefString, splitFrontmatter, type PageRef } from '../core/pages';
+import { indexEntries, pageMeta, pageRefString, splitFrontmatter, type AnswerFiling, type PageRef } from '../core/pages';
 import { textFor } from '../core/text';
 import type { AnswerId, ChatTarget, DomainName, MemoId } from '../core/types';
 import { composeSystemPrompt } from '../core/wiki';
@@ -119,6 +119,17 @@ export type PageView = {
   readonly links: ReadonlyMap<string, PageRef>;
 };
 
+/** A stored turn, as Save answer names it: the screen passes this, never the answer's text. */
+export type TurnRef = { readonly chat: ChatId; readonly n: number };
+
+/** Why a turn cannot be filed before any file is looked at. */
+export type FilingRefusal =
+  /** No such turn, or one that failed. */
+  | { readonly kind: 'no-turn' }
+  /** A root chat that cites nothing, or a domain no longer declared. */
+  | { readonly kind: 'no-domain' }
+  | { readonly kind: 'paused'; readonly problems: readonly ConfigProblem[] };
+
 export type ChatDeps = {
   /** The journal's committed view. Not called fs, a name boundary.test keeps for the engine's own folder. */
   readonly committed: ReadFs;
@@ -146,7 +157,12 @@ const failedView = (r: TurnRecord, o: Outcome<'failed'>): FailedTurn => ({ kind:
 const viewOf = (r: TurnRecord, target: ChatTarget, declared: readonly DomainName[]): ChatTurn =>
   r.outcome.kind === 'answered' ? answeredView(r, r.outcome, target, declared) : failedView(r, r.outcome);
 
-export function chatService(deps: ChatDeps): { readonly chats: Chats; page(ref: PageRef): Promise<PageView | null> } {
+export function chatService(deps: ChatDeps): {
+  readonly chats: Chats;
+  page(ref: PageRef): Promise<PageView | null>;
+  /** Save answer's first half: the stored turn as dotoriwiki's AnswerFiling. engine.ts stages it. */
+  filing(turn: TurnRef): Promise<AnswerFiling | FilingRefusal>;
+} {
   const { committed, store } = deps;
   const claims = new Map<ChatId, { readonly abort: AbortController; readonly done: Promise<void> }>();
 
@@ -274,6 +290,19 @@ export function chatService(deps: ChatDeps): { readonly chats: Chats; page(ref: 
         body,
         links: linksOf(body, ref.domain, declared, null),
       };
+    },
+
+    async filing(ref) {
+      const rows = await store.turns(ref.chat);
+      const r = rows.find((x) => x.n === ref.n);
+      if (!r || r.outcome.kind !== 'answered') return { kind: 'no-turn' };
+      const c = await deps.config();
+      if (!c.ok) return { kind: 'paused', problems: c.problems };
+      const declared = [...c.config.domains.keys()];
+      const target = targetOf(r.target, declared);
+      const view = target ? answeredView(r, r.outcome, target, declared) : null;
+      if (!view?.saveTo) return { kind: 'no-domain' };
+      return { id: view.answerId, domain: view.saveTo, question: r.question, answer: r.outcome.answer, cited: view.cited, sessionId: ref.chat, askedAt: r.askedAt };
     },
   };
 }

@@ -1,22 +1,27 @@
 /**
  * runNext(d): a domain's next job, start to ledger line. dotoriwiki's runNext, #candidates, #check,
  * #commitJob, and #commitFailure, with git replaced by the journal and the CLI by the tool loop.
+ *
+ * stageAnswer is the file-answer job's input, beside candidates(), which takes it, so one module
+ * owns both ends: the duplicate rule is candidates()' skip rule, and the save-time link check is
+ * check() over the page the job will write.
  */
 
-import type { DomainConfig, WikiConfig } from '../core/config';
+import type { ConfigProblem, DomainConfig, WikiConfig } from '../core/config';
 import { committedPages, dayIn, ingestInstructions } from '../core/filing';
 import { paths, type WikiPath } from '../core/layout';
 import type { Ledger, VerdictId } from '../core/ledger';
 import {
-  check, namesOf, pageMeta, parseAnswerId, parseAnswerStaging, parseMemoFile, parseMemoId, parsePageRef, renderAnswerPage, renderIndex, roleOf,
+  check, extractWikilinks, namesOf, pageMeta, parseAnswerId, parseAnswerStaging, parseMemoFile, parseMemoId, parsePageRef, renderAnswerPage, renderAnswerStaging, renderIndex, roleOf,
   type AnswerFiling, type PageRef, type Problem,
 } from '../core/pages';
 import { orderKey } from '../core/places';
 import { textFor, type Text } from '../core/text';
-import type { DomainName, MemoId } from '../core/types';
+import type { AnswerId, DomainName, MemoId } from '../core/types';
 import { composeSystemPrompt, readLedger } from '../core/wiki';
 import { runAgent } from '../agent/loop';
-import type { Fs } from '../core/fs';
+import type { Fs, ReadFs } from '../core/fs';
+import type { FilingRefusal } from './chat';
 import type { Ctx, Engine, JobRef, Pass, RunReport } from './engine';
 import { memoFile } from './memos';
 import type { JobTx } from './transaction';
@@ -26,10 +31,25 @@ type Candidate =
   | { readonly kind: 'file-answer'; readonly ref: JobRef; readonly order: string; readonly staging: WikiPath; readonly filing: AnswerFiling }
   | { readonly kind: 'ingest'; readonly ref: JobRef; readonly order: string; readonly id: MemoId };
 
+export type SaveResult =
+  /** inbox/answers/<d>/<id>.md is whole. The runner files it; MemoBook.answers shows staged, then saved. */
+  | { readonly kind: 'staged'; readonly domain: DomainName; readonly id: AnswerId }
+  /** Already staged, or already in the ledger: nothing written. */
+  | { readonly kind: 'duplicate'; readonly domain: DomainName; readonly id: AnswerId }
+  | { readonly kind: 'refused'; readonly reason: SaveRefusal };
+
+export type SaveRefusal =
+  | FilingRefusal
+  /** A link the answer page would carry names no page now: the job would fail check() three times. `page` is the link as written. */
+  | { readonly kind: 'missing-page'; readonly page: string };
+
 const byOrder = (a: Candidate, b: Candidate) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0);
 const under = (d: DomainName, files: readonly WikiPath[]) => files.map((f) => f.slice(`${paths.wiki(d)}/`.length));
 
-export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName, pass?: Pass) => Promise<void>): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void> } {
+export function domainJobs(
+  ctx: Ctx,
+  finishMoves: (d: DomainName, pass?: Pass) => Promise<void>,
+): Pick<Engine, 'runNext'> & { readonly init: () => Promise<void>; stageAnswer(filing: AnswerFiling): Promise<SaveResult> } {
   const { fs } = ctx;
 
   /** The pages and answers under wiki/ as they are now, for index.md. */
@@ -98,6 +118,34 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName, pass?: Pass) =
     });
   }
 
+  /**
+   * The first link of the answer page the file-answer job would write that check() finds broken, over
+   * the committed folder, so a page an uncommitted ingest made does not count. Lists the filing
+   * domain and each domain a link names, as checkJob lists every domain.
+   */
+  async function brokenLink(config: WikiConfig, dc: DomainConfig, filing: AnswerFiling, committed: ReadFs): Promise<string | null> {
+    const d = dc.name;
+    const existing = under(d, await committed.listTree(paths.wiki(d)));
+    const page = renderAnswerPage(filing, dayIn(config.timeZone, ctx.now()), new Set(existing), textFor(config.locale));
+    const path = `${paths.wiki(d)}/${page.pathUnderWiki}`;
+    const named = extractWikilinks(page.content).flatMap((l) => [...config.domains.keys()].filter((o) => o !== d && l.startsWith(`${o}/wiki/`)));
+    const names = new Map<string, ReadonlySet<string>>([[d, namesOf([...existing, page.pathUnderWiki])]]);
+    for (const o of new Set(named)) names.set(o, namesOf(under(o, await committed.listTree(paths.wiki(o)))));
+    const problems = check({
+      domain: d,
+      changes: [{ path, status: 'added' }],
+      contents: new Map([[path, page.content]]),
+      reviewBefore: null,
+      names,
+      allowedTypes: new Set([...dc.pageTypes.map((p) => p.type), 'answer']),
+      outsideWrites: [],
+      modifiedInputs: [],
+      attachments: new Set(await committed.list(paths.attachments)),
+    });
+    const broken = problems.find((p) => p.rule === 'broken-link');
+    return broken ? (/\[\[(.+?)\]\] does not resolve/.exec(broken.detail)?.[1] ?? broken.detail) : null;
+  }
+
   async function settle(dc: DomainConfig, t: Text, tx: JobTx, job: JobRef, problems: readonly Problem[], verdict: VerdictId | null): Promise<RunReport> {
     if (verdict && problems.length === 0) {
       // Before the applied line: a commit never lands without its record, and a record whose line never landed counts for nothing.
@@ -112,6 +160,25 @@ export function domainJobs(ctx: Ctx, finishMoves: (d: DomainName, pass?: Pass) =
   }
 
   return {
+    /**
+     * Runs in no lane, so a save never waits behind an ingest: every read before the create is
+     * idempotent, and create never replaces a file, so two saves of one turn make one staging file.
+     */
+    async stageAnswer(filing) {
+      const c = await ctx.config();
+      if (!c.ok) return { kind: 'refused', reason: { kind: 'paused', problems: c.problems } };
+      const dc = c.config.domains.get(filing.domain);
+      if (!dc) return { kind: 'refused', reason: { kind: 'no-domain' } };
+      const done = { domain: dc.name, id: filing.id };
+      const committed = ctx.journal.committedFs();
+      // Before the link check: a filed answer stays filed even if a page it cites goes later.
+      if ((await readLedger(committed, dc.name)).history('file-answer', filing.id).terminal) return { kind: 'duplicate', ...done };
+      const page = await brokenLink(c.config, dc, filing, committed);
+      if (page !== null) return { kind: 'refused', reason: { kind: 'missing-page', page } };
+      const made = await fs.create(`${paths.answersInbox(dc.name)}/${filing.id}.md` as WikiPath, renderAnswerStaging(filing));
+      return { kind: made === 'created' ? 'staged' : 'duplicate', ...done };
+    },
+
     /** dotoriwiki's bootstrap: every declared domain gets its log.md and index.md when the wiki opens. */
     async init() {
       const c = await ctx.config();

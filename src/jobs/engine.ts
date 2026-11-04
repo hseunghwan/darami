@@ -30,15 +30,17 @@ import { readConfig } from '../core/wiki';
 import { LIMITS, type AgentLimits, type ChatLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
 import { openBook, type Book, type BookParts, type BookStore, type Pass } from './book';
-import { chatService, type Chats, type ChatStore, type PageView } from './chat';
-import { domainJobs } from './domain';
+import { chatService, type Chats, type ChatStore, type PageView, type TurnRef } from './chat';
+import { domainJobs, type SaveResult } from './domain';
 import { lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
 
 export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow, Pass } from './book';
-export type { AnsweredTurn, AskResult, AskTrace, ChatFailure, ChatStore, ChatSummary, ChatTurn, ChatView, FailedTurn, PageView, Question } from './chat';
+export type { AnsweredTurn, AskResult, AskTrace, ChatFailure, ChatStore, ChatSummary, ChatTurn, ChatView, FailedTurn, PageView, Question, TurnRef } from './chat';
+export type { SaveRefusal, SaveResult } from './domain';
 export type { ChatProgress } from '../agent/loop';
+export type { AnswerPlacement } from '../core/places';
 export type { Finished, Placement } from '../core/places';
 export type { FailureCode, MemoFailure } from '../core/filing';
 
@@ -106,6 +108,12 @@ export type Engine = {
   readonly chats: Chats;
   /** A wiki page for the page viewer, as of the last commit. null when there is no such page. */
   page(ref: PageRef): Promise<PageView | null>;
+  /**
+   * Stages a stored answer for its domain's file-answer job, after checking every link its page
+   * would carry against the committed folder. The same turn again is a duplicate. Writes only
+   * inbox/answers/<d>/<id>.md; the job writes the page and the ledger line.
+   */
+  saveAnswer(turn: TurnRef): Promise<SaveResult>;
 };
 
 export type EngineDeps = {
@@ -198,5 +206,9 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     },
     chats: chat.chats,
     page: chat.page,
+    async saveAnswer(turn) {
+      const f = await chat.filing(turn);
+      return 'id' in f ? jobs.stageAnswer(f) : { kind: 'refused', reason: f };
+    },
   };
 }
