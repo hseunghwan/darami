@@ -8,9 +8,11 @@ import { DatabaseSync } from 'node:sqlite';
 import type { WikiPath } from '../../core/layout';
 import type { DomainName } from '../../core/types';
 import type { BookStore, MemoHeader } from '../book';
-import { sqliteBook, sqliteJournal, type Sql } from '../sqlite';
+import { parseChatId } from '../../core/chat';
+import type { ChatStore, TurnRecord } from '../chat';
+import { sqliteBook, sqliteChats, sqliteJournal, type Sql } from '../sqlite';
 import type { JournalStore } from '../transaction';
-import { memoryBook, memoryJournal } from './harness';
+import { memoryBook, memoryChats, memoryJournal } from './harness';
 
 const 스터디 = '스터디' as DomainName;
 const 일상 = '일상' as DomainName;
@@ -119,4 +121,57 @@ test('the SQL book store sees only its own folder, and drops a row a hand edit b
   const { headers, commits } = await sqliteBook('content://a', async () => nodeSql(d)).load();
   assert.equal(headers.length, 119);
   assert.deepEqual(commits, []);
+});
+
+const C1 = parseChatId('11111111-1111-4111-8111-111111111111')!;
+const C2 = parseChatId('22222222-2222-4222-8222-222222222222')!;
+const C3 = parseChatId('33333333-3333-4333-8333-333333333333')!;
+const asked = (chat: TurnRecord['chat'], n: number, at: string, question = `q${n}`): TurnRecord => ({
+  chat, n, target: '스터디', askedAt: at, at, question, outcome: n % 2 ? { kind: 'failed', failure: 'rate-limited' } : { kind: 'answered', answer: `a${n}`, cited: ['스터디/wiki/RAG'] },
+});
+
+const chatStores: [string, () => ChatStore][] = [
+  ['memory', () => memoryChats()],
+  ['sqlite', () => sqliteChats('content://tree/primary%3ADocuments%2Fwiki', async () => nodeSql())],
+];
+
+describe.each(chatStores)('the %s chat store', (_, make) => {
+  test('chats come newest updated first, each with its first question, turn count, and times; turns in order', async () => {
+    const s = make();
+    await s.add(asked(C1, 0, '2026-10-29T00:00:00.000Z', '처음'));
+    await s.add(asked(C2, 0, '2026-10-29T00:01:00.000Z'));
+    await s.add(asked(C1, 1, '2026-10-29T00:02:00.000Z'));
+    await s.add({ ...asked(C3, 0, '2026-10-29T00:02:00.000Z'), target: null });
+    assert.deepEqual(await s.chats(), [
+      { chat: C3, target: null, createdAt: '2026-10-29T00:02:00.000Z', updatedAt: '2026-10-29T00:02:00.000Z', turns: 1, first: 'q0' },
+      { chat: C1, target: '스터디', createdAt: '2026-10-29T00:00:00.000Z', updatedAt: '2026-10-29T00:02:00.000Z', turns: 2, first: '처음' },
+      { chat: C2, target: '스터디', createdAt: '2026-10-29T00:01:00.000Z', updatedAt: '2026-10-29T00:01:00.000Z', turns: 1, first: 'q0' },
+    ]);
+    assert.deepEqual(await s.turns(C1), [asked(C1, 0, '2026-10-29T00:00:00.000Z', '처음'), asked(C1, 1, '2026-10-29T00:02:00.000Z')]);
+    assert.deepEqual(await s.turns(parseChatId('44444444-4444-4444-8444-444444444444')!), []);
+  });
+
+  test('a turn number is taken once, and removing a chat removes only its turns', async () => {
+    const s = make();
+    await s.add(asked(C1, 0, '2026-10-29T00:00:00.000Z'));
+    await s.add(asked(C2, 0, '2026-10-29T00:00:00.000Z'));
+    await assert.rejects(s.add(asked(C1, 0, '2026-10-29T00:05:00.000Z')));
+    await s.remove(C1);
+    assert.deepEqual(await s.turns(C1), []);
+    assert.deepEqual((await s.chats()).map((c) => c.chat), [C2]);
+  });
+});
+
+test('the SQL chat store sees only its own folder, and reads back a hand-broken row as far as it can', async () => {
+  const d = new DatabaseSync(':memory:');
+  const a = sqliteChats('content://a', async () => nodeSql(d));
+  await a.add(asked(C1, 0, '2026-10-29T00:00:00.000Z'));
+  await a.add(asked(C1, 1, '2026-10-29T00:01:00.000Z'));
+  assert.deepEqual(await sqliteChats('content://b', async () => nodeSql(d)).chats(), []);
+  assert.throws(() => d.exec(`INSERT INTO chat_turn (folder, chat, n, asked_at, at, question, answer, cited, failure) VALUES ('content://a', '${C2}', 0, 'x', 'x', 'q', 'a', '[]', 'login')`), /CHECK/);
+  d.exec(`UPDATE chat_turn SET failure = 'fax' WHERE n = 1; UPDATE chat_turn SET cited = 'not json' WHERE n = 0`);
+  d.exec(`INSERT INTO chat_turn (folder, chat, n, asked_at, at, question, failure) VALUES ('content://a', 'not-a-uuid', 0, 'x', 'x', 'q', 'login')`);
+  const turns = await sqliteChats('content://a', async () => nodeSql(d)).turns(C1);
+  assert.deepEqual(turns.map((t) => t.outcome), [{ kind: 'answered', answer: 'a0', cited: [] }, { kind: 'failed', failure: 'other' }]);
+  assert.deepEqual((await a.chats()).map((c) => c.chat), [C1]);
 });
