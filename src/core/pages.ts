@@ -329,6 +329,9 @@ export function extractWikilinks(markdown: string): readonly string[] {
   return out;
 }
 
+/** The image embeds in these texts, as check() matches them against _attachments/. */
+export const imageTargets = (texts: Iterable<string>): readonly string[] => [...new Set([...texts].flatMap((t) => extractWikilinks(t).filter(isImageLink)))];
+
 /** index.md's page lines as renderIndex writes them, `- [[d/wiki/p|p]] - summary`: the link's target and the summary. Other lines are skipped. */
 export function indexEntries(text: string): readonly { readonly target: string; readonly summary: string }[] {
   const out: { target: string; summary: string }[] = [];

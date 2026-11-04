@@ -1,9 +1,11 @@
 /** The fakes the engine tests share. Not a test file: testMatch takes *.test.ts only. */
 
+import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Fs } from '../../core/fs';
+import type { JpegSpec, PhotoTools } from '../../core/photos';
 import type { WikiPath } from '../../core/layout';
 import { presetFiles } from '../../core/presets';
 import type { DomainName, Locale } from '../../core/types';
@@ -13,6 +15,7 @@ import { MODEL_PROFILES } from '../../agent/model';
 import type { Located } from '../../core/places';
 import type { MemoId } from '../../core/types';
 import type { BookStore, CommitRecord, MemoBook, MemoHeader } from '../book';
+import type { PhotoWrite } from '../photos';
 import type { ChatRow, ChatStore, TurnRecord } from '../chat';
 import { openEngine, type Engine, type EngineEvent } from '../engine';
 import type { JournalHead, JournalJob, JournalStore, Slot } from '../transaction';
@@ -238,7 +241,17 @@ export async function everyKill(a: {
 export function memoryBook(): BookStore {
   const headers = new Map<string, MemoHeader>();
   const commits = new Map<string, CommitRecord>();
+  const writes = new Map<WikiPath, PhotoWrite>();
   return {
+    async putPhotoWrite(w) {
+      if (!writes.has(w.path)) writes.set(w.path, w);
+    },
+    async photoWrites() {
+      return [...writes.values()];
+    },
+    async dropPhotoWrites(id) {
+      for (const [p, w] of writes) if (w.id === id) writes.delete(p);
+    },
     async load() {
       return { headers: [...headers.values()], commits: [...commits.values()] };
     },
@@ -280,9 +293,34 @@ export function memoryChats(): ChatStore {
   };
 }
 
+/**
+ * The phone's hashing and image code as dotoriwiki's fixture script faked its shrink: a copy is
+ * the bytes as given, which is why made-by-dotoriwiki's copies equal its originals. `specs` records
+ * every call, so a test sees which copy was asked for.
+ */
+export function copyingTools(): PhotoTools & { readonly specs: JpegSpec[] } {
+  const specs: JpegSpec[] = [];
+  return {
+    specs,
+    sha256: async (b) => createHash('sha256').update(b).digest('hex'),
+    jpeg: async (b, spec) => (specs.push(spec), Uint8Array.from(b)),
+  };
+}
+
+/** A phone that decodes the first `ok` images and nothing after. */
+export function refusingTools(ok = 0): PhotoTools {
+  let calls = 0;
+  return { sha256: copyingTools().sha256, jpeg: async (b) => (++calls <= ok ? Uint8Array.from(b) : null) };
+}
+
+export type Ports = { readonly photos?: PhotoTools; readonly now?: () => Date };
+
 /** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
-export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook(), chats: ChatStore = memoryChats()): Promise<Engine> =>
-  openEngine({ fs, journal: store, book, chats, model, machine: { modelProfiles: MODEL_PROFILES }, now: FIXTURE_NOW, onEvent: (e) => events.push(e) });
+export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook(), chats: ChatStore = memoryChats(), ports: Ports = {}): Promise<Engine> =>
+  openEngine({
+    fs, journal: store, book, chats, model, machine: { modelProfiles: MODEL_PROFILES }, now: ports.now ?? FIXTURE_NOW, onEvent: (e) => events.push(e),
+    photos: ports.photos ?? copyingTools(),
+  });
 
 /** The next book a watcher hears that `ok` accepts, or this one. Reading memo files the book has not seen needs a watcher. */
 export function bookWhere(e: Engine, ok: (b: MemoBook) => boolean): Promise<MemoBook> {

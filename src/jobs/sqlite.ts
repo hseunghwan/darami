@@ -146,10 +146,18 @@ const BOOK_SCHEMA = `
     pages TEXT NOT NULL,
     PRIMARY KEY (folder, domain, id)
   );
+  CREATE TABLE IF NOT EXISTS photo_write (
+    folder TEXT NOT NULL,
+    path TEXT NOT NULL,
+    id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (folder, path)
+  );
 `;
 
 type HeaderRow = { id: string; captured_at: string; tz: string; source: string; preview: string; place: string | null; photos: number };
 type CommitRow = { domain: string; id: string; finished_at: string; pages: string };
+type PhotoWriteRow = { path: string; id: string; at: string };
 
 const CHANGES = new Set(['created', 'modified']);
 
@@ -200,6 +208,20 @@ export function sqliteBook(folder: string, open: () => Promise<Sql> = appDb): Bo
         'INSERT OR REPLACE INTO memo_commit (folder, domain, id, finished_at, pages) VALUES (?, ?, ?, ?, ?)',
         folder, r.domain, r.id, r.at, JSON.stringify(r.pages),
       );
+    },
+    async putPhotoWrite(w) {
+      await (await db()).runAsync('INSERT OR IGNORE INTO photo_write (folder, path, id, at) VALUES (?, ?, ?, ?)', folder, w.path, w.id, w.at);
+    },
+    async photoWrites() {
+      const rows = await (await db()).getAllAsync<PhotoWriteRow>('SELECT path, id, at FROM photo_write WHERE folder = ? ORDER BY rowid', folder);
+      return rows.flatMap((r) => {
+        const id = parseMemoId(r.id);
+        const path = parseWikiPath(r.path);
+        return id && path ? [{ id, path, at: r.at }] : [];
+      });
+    },
+    async dropPhotoWrites(id) {
+      await (await db()).runAsync('DELETE FROM photo_write WHERE folder = ? AND id = ?', folder, id);
     },
   };
 }

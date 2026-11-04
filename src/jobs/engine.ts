@@ -23,10 +23,11 @@ import { dayIn } from '../core/filing';
 import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
 import type { NewMemo, PageRef, Problem, Routing } from '../core/pages';
+import type { PhotoTools } from '../core/photos';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
-import { readConfig } from '../core/wiki';
+import { readConfig, readPlaces } from '../core/wiki';
 import { LIMITS, type AgentLimits, type ChatLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
 import { openBook, type Book, type BookParts, type BookStore, type Pass } from './book';
@@ -34,6 +35,7 @@ import { chatService, type Chats, type ChatStore, type PageView, type TurnRef } 
 import { domainJobs, type SaveResult } from './domain';
 import { lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
+import { photoFiles, type PendingPhotos, type PhotoFiles, type PhotoRefusal } from './photos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
 
 export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow, Pass } from './book';
@@ -43,14 +45,14 @@ export type { ChatProgress } from '../agent/loop';
 export type { AnswerPlacement } from '../core/places';
 export type { Finished, Placement } from '../core/places';
 export type { FailureCode, MemoFailure } from '../core/filing';
+export type { PendingPhotos, PhotoRefusal } from './photos';
 
 export type JobRef = { readonly kind: 'ingest' | 'file-answer'; readonly domain: DomainName; readonly id: string };
 
 export type AcceptResult =
   | { readonly kind: 'created' }
   | { readonly kind: 'duplicate'; readonly at: Located | 'inbox' }
-  /** P3 files text memos; photos come with P6. */
-  | { readonly kind: 'photos-unsupported' };
+  | PhotoRefusal;
 
 export type RouteReport =
   | { readonly kind: 'idle' }
@@ -82,8 +84,15 @@ export type EngineEvent =
   | ({ readonly kind: 'recovered' } & Recovered);
 
 export type Engine = {
-  /** Writes inbox/<id>.md and never calls the model. Sending the same id again changes nothing. */
-  accept(memo: NewMemo): Promise<AcceptResult>;
+  /**
+   * Writes the memo's photos, then inbox/<id>.md, and never calls the model. Each photo's original
+   * and copy go first, one photo at a time, and the memo file last, so a memo never names a photo
+   * that is not stored. Sending the same id again changes nothing; after a kill it writes only what
+   * is missing and finishes what was cut off. A memo the book already locates past the inbox is a
+   * duplicate before any photo is read. `pending` reads photo n from the phone; without it every
+   * original must already be stored.
+   */
+  accept(memo: NewMemo, pending?: PendingPhotos): Promise<AcceptResult>;
   /** Routes the oldest inbox memo by its hint, the classifier, or the fallback, into raw/ or hold/. */
   routeNext(signal: AbortSignal, pass?: Pass): Promise<RouteReport>;
   /**
@@ -129,6 +138,8 @@ export type EngineDeps = {
   readonly chats: ChatStore;
   readonly chatLimits?: ChatLimits;
   readonly onEvent?: (e: EngineEvent) => void;
+  /** phonePhotoTools on the phone, copyingTools() under jest. */
+  readonly photos: PhotoTools;
 };
 
 /** What memos.ts and domain.ts share. `fs` is the book's, so every read and write reaches the book. */
@@ -143,8 +154,11 @@ export type Ctx = {
   readonly config: () => Promise<ConfigParse>;
   readonly onEvent: (e: EngineEvent) => void;
   readonly memoLane: Lane;
+  /** Accepts' photo writes, one memo at a time, outside the memo lane: a copy takes about a second and touches no memo file. */
+  readonly photoLane: Lane;
   readonly router: Lane;
   readonly jobLane: (d: DomainName) => Lane;
+  readonly photos: PhotoFiles;
 };
 
 const NO_CONFIG: ConfigParse = { ok: false, problems: [{ key: CONFIG_FILE, problem: 'does not exist', fix: 'restore it, or pick the wiki folder again' }] };
@@ -168,6 +182,16 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
   };
   const onEvent = deps.onEvent ?? (() => {});
   const journal = openJournal({ fs: book.fs, store: book.journal, words, onRecovered: (r) => onEvent({ kind: 'recovered', ...r }) });
+  const photos = photoFiles({
+    fs: book.fs,
+    tools: deps.photos,
+    writes: deps.book,
+    now: deps.now,
+    places: async () => {
+      const c = await config();
+      return c.ok ? readPlaces(book.fs, c.config, await journal.running()) : null;
+    },
+  });
   const ctx: Ctx = {
     fs: book.fs,
     book,
@@ -178,10 +202,13 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     config,
     onEvent,
     memoLane: lane(),
+    photoLane: lane(),
     router: lane(),
     jobLane: lanes<DomainName>(),
+    photos,
   };
   await journal.recover();
+  await photos.sweep();
   const memos = memoTransitions(ctx);
   const jobs = domainJobs(ctx, memos.finishMoves);
   await jobs.init();
