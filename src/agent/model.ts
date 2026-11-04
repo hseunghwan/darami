@@ -7,7 +7,7 @@
  * The wire shapes (InputItem, OutputItem, FunctionTool) appear here and in agent/loop.ts only.
  */
 
-import type { Credentials, Effort, FunctionTool, InputItem, ModelFailure, OutputItem, TurnRequest, TurnResult } from '../codex/responses';
+import { EFFORTS, type Credentials, type Effort, type FunctionTool, type InputItem, type ModelFailure, type OutputItem, type TurnRequest, type TurnResult } from '../codex/responses';
 import type { ModelProfile } from '../core/config';
 import { classifySchema, parseClassification, type Classification } from '../core/filing';
 import type { DomainName } from '../core/types';
@@ -51,7 +51,13 @@ export type ModelTurn =
 
 export type Model = (req: ModelRequest, signal: AbortSignal) => Promise<ModelTurn>;
 
-export type ModelChoice = { readonly model: string; readonly effort: Effort };
+export type RoleModel = { readonly model: string; readonly effort: Effort };
+
+/** What the user picked in Settings. null is the default: MODELS for the role. */
+export type ModelChoice = { readonly filing: RoleModel | null; readonly ask: RoleModel | null };
+export const NO_CHOICE: ModelChoice = { filing: null, ask: null };
+
+export const DEFAULT_MODEL = 'gpt-6-luna';
 
 /**
  * Only gpt-6-luna was measured on the phone (classify 3.3 s at low effort, a tool turn 1.5 s).
@@ -60,17 +66,40 @@ export type ModelChoice = { readonly model: string; readonly effort: Effort };
  * runs at low effort because someone is waiting for the first word.
  */
 export const MODELS = {
-  classify: { model: 'gpt-6-luna', effort: 'low' },
-  chat: { model: 'gpt-6-luna', effort: 'low' },
-  ingest: { default: { model: 'gpt-6-luna', effort: 'medium' } },
-} as const satisfies { readonly classify: ModelChoice; readonly chat: ModelChoice; readonly ingest: { readonly default: ModelChoice } };
+  classify: { model: DEFAULT_MODEL, effort: 'low' },
+  chat: { model: DEFAULT_MODEL, effort: 'low' },
+  ingest: { default: { model: DEFAULT_MODEL, effort: 'medium' } },
+} as const satisfies { readonly classify: RoleModel; readonly chat: RoleModel; readonly ingest: { readonly default: RoleModel } };
 
 export const MODEL_PROFILES: ReadonlySet<string> = new Set(Object.keys(MODELS.ingest));
 
-export function choiceFor(role: ModelRole, profile: ModelProfile | null): ModelChoice {
-  const ingest: Readonly<Record<string, ModelChoice>> = MODELS.ingest;
-  if (role === 'classify' || role === 'chat') return MODELS[role];
+/** The filing pick covers classify and ingest, and wins over model_profile: the user chose it on this phone, the yaml came from dotoriwiki. */
+export function choiceFor(role: ModelRole, profile: ModelProfile | null, choice: ModelChoice): RoleModel {
+  const ingest: Readonly<Record<string, RoleModel>> = MODELS.ingest;
+  if (role === 'chat') return choice.ask ?? MODELS.chat;
+  if (choice.filing) return choice.filing;
+  if (role === 'classify') return MODELS.classify;
   return (profile && ingest[profile]) || MODELS.ingest.default;
+}
+
+const isEffort = (v: unknown): v is Effort => (EFFORTS as readonly unknown[]).includes(v);
+
+function roleModel(v: unknown): RoleModel | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const { model, effort } = v as Record<string, unknown>;
+  return typeof model === 'string' && model.trim() !== '' && isEffort(effort) ? { model, effort } : null;
+}
+
+/** kv's `models`, as written by JSON.stringify of a ModelChoice. Anything unreadable is the default. */
+export function parseModelChoice(text: string | null): ModelChoice {
+  try {
+    const v: unknown = text ? JSON.parse(text) : null;
+    if (typeof v !== 'object' || v === null) return NO_CHOICE;
+    const o = v as Record<string, unknown>;
+    return { filing: roleModel(o.filing), ask: roleModel(o.ask) };
+  } catch {
+    return NO_CHOICE;
+  }
 }
 
 const MINUTE = 60_000;
@@ -109,12 +138,14 @@ export type CodexDeps = {
   readonly runTurn: (creds: Credentials, req: TurnRequest) => Promise<TurnResult>;
   /** Returns a cancel function. */
   readonly setTimer: (ms: number, fire: () => void) => () => void;
+  /** Read at each turn, so a pick in Settings applies to the next one. */
+  readonly choice: () => ModelChoice;
 };
 
 /** The Model over the Codex endpoint. A 401 gets one forced refresh and one more try before it reads as a login problem. */
 export function codexModel(deps: CodexDeps): Model {
   return async (req, signal) => {
-    const choice = choiceFor(req.role, req.profile);
+    const choice = choiceFor(req.role, req.profile, deps.choice());
     const turn = async (creds: Credentials): Promise<{ readonly r: TurnResult; readonly stalled: boolean }> => {
       const abort = new AbortController();
       let stalled = false;

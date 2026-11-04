@@ -12,7 +12,7 @@ import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
 import { articleFetcher } from './links/fetch';
-import { MODEL_PROFILES } from './agent/model';
+import { MODEL_PROFILES, NO_CHOICE, parseModelChoice, type ModelChoice, type RoleModel } from './agent/model';
 import { completeDeviceLogin, requestDeviceCode, type AuthFailure, type DeviceCode } from './codex/auth';
 import { loadSession, logOut as forgetLogin, saveTokens } from './codex/session';
 import { pickSafTree, safFs } from './fs/saf';
@@ -60,10 +60,12 @@ export type App = {
   book: MemoBook | null;
   /** Whether the phone has a network, as expo-network last said; null until it answers. */
   online: boolean | null;
+  /** The models picked in Settings, kept in kv `models`. */
+  models: ModelChoice;
 };
 
 let app: App = {
-  ready: false, settings: { location: false, theme: 'system' }, folder: null, jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null,
+  ready: false, settings: { location: false, theme: 'system' }, folder: null, jobs: { paused: null, last: null }, login: { kind: 'out' }, book: null, online: null, models: NO_CHOICE,
 };
 const listeners = new Set<() => void>();
 
@@ -85,6 +87,14 @@ export async function updateSettings(patch: Partial<Settings>): Promise<void> {
   const settings = { ...app.settings, ...patch };
   set({ settings });
   await kv.set('settings', JSON.stringify(settings));
+}
+
+/** null puts the role back on the default. The next turn uses it, and a pause for a refused model ends. */
+export async function pickModel(role: keyof ModelChoice, pick: RoleModel | null): Promise<void> {
+  const models = { ...app.models, [role]: pick };
+  set({ models });
+  await kv.set('models', JSON.stringify(models));
+  void runner.modelPicked();
 }
 
 /** model_profile names a key of agent/model.ts MODELS.ingest, so a profile added there stops warning with no second list. */
@@ -131,7 +141,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       journal: sqliteJournal(folder.tree.uri),
       book: sqliteBook(folder.tree.uri),
       chats: sqliteChats(folder.tree.uri),
-      model: phoneModel,
+      model: phoneModel(() => app.models),
       machine: MACHINE,
       now: () => new Date(),
       onEvent: note,
@@ -507,12 +517,13 @@ let booted: Promise<void> | null = null;
 
 export function boot(): Promise<void> {
   booted ??= (async () => {
-    const [settings, folder, session] = await Promise.all([
+    const [settings, folder, session, models] = await Promise.all([
       kv.get('settings').then(parseSettings),
       kv.get('folder').then(parseFolder),
       loadSession().catch(() => ({ kind: 'none' }) as const),
+      kv.get('models').then(parseModelChoice, () => NO_CHOICE),
     ]);
-    set({ ready: true, settings, folder, login: loginOf(session, false) });
+    set({ ready: true, settings, folder, login: loginOf(session, false), models });
     void recheckFolder();
     const draft = parseSavedDraft(await kv.get(DRAFT_KEY).catch(() => null));
     sweepPending(new Set(draft?.photos.map((p) => fileName(p.uri)) ?? []));

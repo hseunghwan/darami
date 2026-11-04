@@ -5,13 +5,15 @@
 
 import { runTurn } from '../codex/responses';
 import { credentials } from '../codex/session';
-import { codexModel, type Model } from './model';
+import { codexModel, type Model, type ModelChoice } from './model';
 
-export const phoneModel: Model = codexModel({
-  credentials: (opts) => credentials(fetch, opts),
-  runTurn: (creds, req) => runTurn(fetch, creds, req),
-  setTimer: (ms, fire) => {
-    const t = setTimeout(fire, ms);
-    return () => clearTimeout(t);
-  },
-});
+export const phoneModel = (choice: () => ModelChoice): Model =>
+  codexModel({
+    credentials: (opts) => credentials(fetch, opts),
+    runTurn: (creds, req) => runTurn(fetch, creds, req),
+    setTimer: (ms, fire) => {
+      const t = setTimeout(fire, ms);
+      return () => clearTimeout(t);
+    },
+    choice,
+  });

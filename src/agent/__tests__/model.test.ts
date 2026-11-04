@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import type { Credentials, ModelFailure, TurnRequest, TurnResult } from '../../codex/responses';
 import type { ModelProfile } from '../../core/config';
 import type { DomainName } from '../../core/types';
-import { choiceFor, classify, codexModel, MODEL_PROFILES, MODELS, problemOf, TURN_STALL_MS, type CredentialsAnswer, type ModelRequest } from '../model';
+import {
+  choiceFor, classify, codexModel, MODEL_PROFILES, MODELS, NO_CHOICE, parseModelChoice, problemOf, TURN_STALL_MS, type CredentialsAnswer, type ModelChoice, type ModelRequest,
+} from '../model';
 import { fakeModel, turn } from './fake-model';
 
 const creds = (n: number): Credentials => ({ accessToken: `t${n}`, accountId: 'acct' });
@@ -11,7 +13,7 @@ const fail = (failure: ModelFailure): TurnResult => ({ ok: false, failure });
 const req: ModelRequest = { role: 'ingest', profile: null, instructions: 'i', input: [] };
 
 /** codexModel over scripted credentials and turns, recording what each turn was sent. */
-function harness(answers: { creds?: CredentialsAnswer[]; turns: ((r: TurnRequest) => TurnResult | Promise<TurnResult>)[] }) {
+function harness(answers: { creds?: CredentialsAnswer[]; turns: ((r: TurnRequest) => TurnResult | Promise<TurnResult>)[]; choice?: () => ModelChoice }) {
   const sent: { creds: Credentials; req: TurnRequest }[] = [];
   const asked: { force?: boolean }[] = [];
   const timers: { ms: number; fire: () => void; cancelled: boolean }[] = [];
@@ -24,16 +26,49 @@ function harness(answers: { creds?: CredentialsAnswer[]; turns: ((r: TurnRequest
       timers.push(t);
       return () => void (t.cancelled = true);
     },
+    choice: answers.choice ?? (() => NO_CHOICE),
   });
   return { model, sent, asked, timers };
 }
 
-test('the model choices are constants: luna at low effort to classify, at medium to ingest, and the only profile is default', () => {
-  assert.deepEqual(choiceFor('classify', null), { model: 'gpt-6-luna', effort: 'low' });
-  assert.deepEqual(choiceFor('ingest', null), { model: 'gpt-6-luna', effort: 'medium' });
-  assert.deepEqual(choiceFor('ingest', 'strong' as ModelProfile), MODELS.ingest.default);
+test('with no pick, luna runs at low effort to classify and chat and at medium to ingest, and the only profile is default', () => {
+  assert.deepEqual(choiceFor('classify', null, NO_CHOICE), { model: 'gpt-6-luna', effort: 'low' });
+  assert.deepEqual(choiceFor('ingest', null, NO_CHOICE), { model: 'gpt-6-luna', effort: 'medium' });
+  assert.deepEqual(choiceFor('ingest', 'strong' as ModelProfile, NO_CHOICE), MODELS.ingest.default);
   assert.deepEqual([...MODEL_PROFILES], ['default']);
-  assert.deepEqual(choiceFor('chat', 'strong' as ModelProfile), { model: 'gpt-6-luna', effort: 'low' }, 'chat ignores model_profile');
+  assert.deepEqual(choiceFor('chat', 'strong' as ModelProfile, NO_CHOICE), { model: 'gpt-6-luna', effort: 'low' }, 'chat ignores model_profile');
+});
+
+test('the filing pick runs classify and ingest, model_profile included, and the Ask pick runs chat', () => {
+  const sol = { model: 'gpt-6-sol', effort: 'high' } as const;
+  const astra = { model: 'gpt-6-astra', effort: 'minimal' } as const;
+  const choice: ModelChoice = { filing: sol, ask: astra };
+  assert.deepEqual(choiceFor('classify', null, choice), sol);
+  assert.deepEqual(choiceFor('ingest', 'default' as ModelProfile, choice), sol);
+  assert.deepEqual(choiceFor('chat', null, choice), astra);
+  assert.deepEqual(choiceFor('chat', null, { filing: sol, ask: null }), MODELS.chat, 'an Ask left on default stays on it');
+  assert.deepEqual(choiceFor('classify', null, { filing: null, ask: astra }), MODELS.classify);
+});
+
+test('the pick survives kv as JSON, and anything unreadable there is the default', () => {
+  const choice: ModelChoice = { filing: { model: 'gpt-6-sol', effort: 'high' }, ask: null };
+  assert.deepEqual(parseModelChoice(JSON.stringify(choice)), choice);
+  assert.deepEqual(parseModelChoice(null), NO_CHOICE);
+  assert.deepEqual(parseModelChoice('{not json'), NO_CHOICE);
+  assert.deepEqual(parseModelChoice('"gpt-6-sol"'), NO_CHOICE);
+  assert.deepEqual(parseModelChoice(JSON.stringify({ filing: { model: 'gpt-6-sol', effort: 'xhigh' }, ask: { model: '', effort: 'low' } })), NO_CHOICE, 'an unknown effort or an empty model is dropped');
+});
+
+test('each turn sends the model and effort picked for its role, read at that turn', async () => {
+  let choice: ModelChoice = { filing: { model: 'gpt-6-sol', effort: 'high' }, ask: { model: 'gpt-6-astra', effort: 'medium' } };
+  const h = harness({ turns: [() => ok, () => ok, () => ok, () => ok], choice: () => choice });
+  const signal = new AbortController().signal;
+  await h.model({ ...req, role: 'classify' }, signal);
+  await h.model({ ...req, role: 'ingest' }, signal);
+  await h.model({ ...req, role: 'chat' }, signal);
+  choice = NO_CHOICE;
+  await h.model({ ...req, role: 'ingest' }, signal);
+  assert.deepEqual(h.sent.map((s) => [s.req.model, s.req.effort]), [['gpt-6-sol', 'high'], ['gpt-6-sol', 'high'], ['gpt-6-astra', 'medium'], ['gpt-6-luna', 'medium']]);
 });
 
 test("a chat turn's text deltas reach the caller as the stream sends them", async () => {
