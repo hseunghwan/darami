@@ -195,3 +195,35 @@ test('a kill anywhere in a lone line leaves the line there or not, never torn', 
   });
   assert.deepEqual(r.seen, ['untouched', 'written']);
 }, 30_000);
+
+test("the committed view reads a live job's paths as they were, hides what it made, and follows the folder once it commits or rolls back", async () => {
+  const { root, store } = await fresh();
+  const fs = nodeFs(root);
+  const journal = open(fs, store);
+  const view = journal.committedFs();
+  const old = at('스터디/wiki/기존.md');
+  const made = at('스터디/wiki/새것.md');
+  const tx = await journal.beginJob(스터디, job());
+  await tx.write(old, 'changed\n');
+  await tx.write(made, 'new\n');
+  assert.equal(await fs.readText(old), 'changed\n', 'the folder holds the live job\'s text');
+  assert.equal(await view.readText(old), 'old\n');
+  assert.equal(await view.readText(made), null);
+  assert.ok(!(await view.listTree(at('스터디/wiki'))).includes(made));
+  assert.deepEqual((await view.list(at('스터디/wiki'))).filter((n) => n.endsWith('.md')), ['log.md', '기존.md']);
+  await tx.commit('created', '# 색인\n');
+  tx.release();
+  assert.equal(await view.readText(old), 'changed\n');
+  assert.equal(await view.readText(made), 'new\n');
+  assert.ok((await view.listTree(at('스터디/wiki'))).includes(made));
+
+  const again = await journal.beginJob(스터디, job(2));
+  await again.write(old, 'torn');
+  assert.equal(await view.readText(old), 'changed\n');
+  await again.abandon();
+  again.release();
+  assert.equal(await view.readText(old), 'changed\n');
+  // @ts-expect-error the committed view has no write
+  assert.equal(view.write, undefined);
+  assert.deepEqual(Object.keys(view).sort(), ['list', 'listTree', 'readText']);
+});
