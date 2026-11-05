@@ -10,7 +10,7 @@ import { parseWikiConfig } from './config';
 import { parseWikiPath, paths, type WikiPath } from './layout';
 import { validTz } from './pages';
 import { PRESET_SOURCE } from './presets.gen';
-import { LOCALES, type Locale } from './types';
+import { LOCALES, type DomainName, type Locale } from './types';
 
 export type PresetFile = { readonly path: WikiPath; readonly text: string };
 
@@ -43,6 +43,17 @@ export function withZone(presetConfig: string, zone: string | undefined): string
   if (!zone || /\s/.test(zone) || !validTz(zone)) return presetConfig;
   const text = presetConfig.replace(/^time_zone: .*$/m, `time_zone: ${zone}`);
   return parseWikiConfig(text, { modelProfiles: new Set() }).ok ? text : presetConfig;
+}
+
+/**
+ * `<name>/CLAUDE.md` for a domain added in the app: the title, the `@../_schema/…` line, and the
+ * purpose heading the locale's preset domains open with, then the description. Both lines are read
+ * from the first preset domain, and presets.test.ts holds every preset domain to the same opening.
+ */
+export function newDomainSchema(locale: Locale, name: DomainName, description: string): string {
+  const [, sample] = Object.entries(PRESET_SOURCE[locale]).find(([p]) => /^[^_/][^/]*\/CLAUDE\.md$/.test(p))!;
+  const [, , include, , heading] = sample.split('\n');
+  return `# ${name}\n\n${include}\n\n${heading}\n\n${description}\n`;
 }
 
 /** The visible names a preset puts at the folder root, dotoriwiki.yaml included. */

@@ -76,7 +76,7 @@ const FEED_KEYS = ['domain'];
 const BAD_NAME_CHARS = /[\\/:*?"<>|[\]#^\p{Cc}]/u;
 
 /** Why `name` cannot be a domain folder, or null. */
-function domainNameProblem(name: string): string | null {
+export function domainNameProblem(name: string): string | null {
   if (name.trim() === '') return 'is empty';
   if (name !== name.trim()) return 'starts or ends with a space';
   if (name.startsWith('_') || name.startsWith('.')) return 'starts with `_` or `.`, which the wiki keeps for its own folders';
@@ -84,6 +84,18 @@ function domainNameProblem(name: string): string | null {
   if (BAD_NAME_CHARS.test(name)) return 'holds a character that breaks a file name or a [[link]] (\\ / : * ? " < > | [ ] # ^)';
   return null;
 }
+
+/** Why `type` cannot name a page type, or null: it must be one word, and `answer` is taken. */
+export function pageTypeProblem(type: string): 'word' | 'answer' | null {
+  if (!/^[^\s`|[\]]+$/.test(type)) return 'word';
+  return type === 'answer' ? 'answer' : null;
+}
+
+/** What a description must be: one line with something on it. */
+export const isLine = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && !v.includes('\n');
+
+/** What a page type's example must be: a path under wiki/ ending in .md. */
+export const isExamplePath = (v: string): boolean => v.endsWith('.md') && !v.startsWith('/') && !v.split('/').includes('..');
 
 /**
  * Text to WikiConfig. Never throws. Every problem is collected, so one round of fixes is enough.
@@ -193,13 +205,14 @@ function parseDomain(name: DomainName, v: unknown, machine: MachineFacts, add: A
     for (const [k, tv] of rawTypes) {
       const type = String(k);
       const tat = `${at}.page_types.${type}`;
-      if (!/^[^\s`|[\]]+$/.test(type)) add(tat, 'the type name is empty or holds a space, backtick, `|`, or bracket', 'use one word');
-      else if (type === 'answer') add(tat, '`answer` is the type of saved chat answers, which every domain has', 'pick another name');
+      const bad = pageTypeProblem(type);
+      if (bad === 'word') add(tat, 'the type name is empty or holds a space, backtick, `|`, or bracket', 'use one word');
+      else if (bad === 'answer') add(tat, '`answer` is the type of saved chat answers, which every domain has', 'pick another name');
       const t = fields(tv, tat, PAGE_TYPE_KEYS, add);
       if (!t) continue;
       const description = line(t.get('description'), `${tat}.description`, add, 'say in one line what a page of this type holds');
       const example = t.get('example') ?? null;
-      if (example !== null && (typeof example !== 'string' || !example.endsWith('.md') || example.startsWith('/') || example.split('/').includes('..'))) {
+      if (example !== null && (typeof example !== 'string' || !isExamplePath(example))) {
         add(`${tat}.example`, `is ${JSON.stringify(example)}`, 'give a path under wiki/ ending in .md, such as `people/Sam.md`');
       }
       pageTypes.push({ type, description: description ?? '', example: typeof example === 'string' ? example : null });
@@ -225,7 +238,7 @@ function fields(v: unknown, at: string, allowed: readonly string[], add: Add): M
 }
 
 function line(v: unknown, at: string, add: Add, fix: string): string | null {
-  if (typeof v === 'string' && v.trim() !== '' && !v.includes('\n')) return v.trim();
+  if (isLine(v)) return v.trim();
   add(at, v === undefined || v === null ? 'is missing' : 'must be one non-empty line', fix);
   return null;
 }
