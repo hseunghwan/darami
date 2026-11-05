@@ -184,6 +184,16 @@ export default function Settings() {
                 <Text style={{ flexShrink: 1, color: folder.state && folder.state.kind !== 'wiki' ? t.warn : t.muted, fontSize: 14 }}>{folderStatus(folder)}</Text>
               </Row>
             )}
+            {folder?.state?.kind === 'wiki' && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={copy.domains.change}
+                onPress={() => router.push('/domains')}
+                style={[st.action, { borderBottomWidth: 1, borderBottomColor: t.line }]}
+              >
+                <Text style={{ color: t.link, fontSize: 14 }}>{copy.domains.change}</Text>
+              </Pressable>
+            )}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={copy.folder.change}
