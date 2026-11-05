@@ -85,14 +85,13 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --console=plain
 
-      - name: Name the APK and its checksum
+      - name: Name the APK
         id: apk
         run: |
           version=$(node -p 'require("./package.json").version')
           name="darami-$version-${GITHUB_SHA::7}-${{ steps.signing.outputs.suffix }}.apk"
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/$name"
-          (cd dist && sha256sum "$name" > "$name.sha256" && cat "$name.sha256")
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4

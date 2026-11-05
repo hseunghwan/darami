@@ -12,7 +12,7 @@
 
 ## 앱 설치하기
 
-1. 폰에서 [Releases](https://github.com/hseunghwan/darami/releases)의 APK를 받습니다. `v`로 시작하는 태그마다 CI가 APK와 `.sha256` 파일을 붙입니다. `main`에 push할 때마다 [app 워크플로](https://github.com/hseunghwan/darami/actions/workflows/app.yml)의 아티팩트로도 남습니다.
+1. 폰에서 [Releases](https://github.com/hseunghwan/darami/releases)의 APK를 받습니다. `v`로 시작하는 태그마다 CI가 APK를 붙입니다. `main`에 push할 때마다 [app 워크플로](https://github.com/hseunghwan/darami/actions/workflows/app.yml)의 아티팩트로도 남습니다.
 2. APK를 엽니다. Android가 APK를 연 앱에서 설치를 허용할지 물어봅니다.
 
 파일 이름은 CI가 릴리스 키로 서명했으면 `-signed`로, 키가 설정되지 않았으면 `-debug-signed`로 끝납니다. Android는 설치된 앱과 다른 키로 서명한 APK로 업데이트하지 않습니다. 서명이 다른 APK로 바꾸려면 먼저 다람이를 지웁니다. 그러면 폰에 있던 로그인과 대화 기록이 지워집니다. 위키 폴더는 그대로 남습니다.

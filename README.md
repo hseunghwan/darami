@@ -12,7 +12,7 @@ The name is 다람이, Korean for a little squirrel. darami grew out of [dotoriw
 
 ## Install the app
 
-1. On the phone, download the APK from [Releases](https://github.com/hseunghwan/darami/releases). CI attaches the APK and its `.sha256` to every tag that starts with `v`. Each push to `main` also leaves one as an artifact of the [app workflow](https://github.com/hseunghwan/darami/actions/workflows/app.yml).
+1. On the phone, download the APK from [Releases](https://github.com/hseunghwan/darami/releases). CI attaches the APK to every tag that starts with `v`. Each push to `main` also leaves one as an artifact of the [app workflow](https://github.com/hseunghwan/darami/actions/workflows/app.yml).
 2. Open the APK. Android asks you to allow installs from the app that opened it.
 
 The file name ends in `-signed` when CI signed it with the release key, and in `-debug-signed` when no key was set up. Android refuses an update signed with a different key than the installed app. To install an APK signed with a different key, uninstall darami first. That deletes the login and the chat history on the phone. The wiki folder stays.
