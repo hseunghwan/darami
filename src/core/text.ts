@@ -23,7 +23,13 @@ export type Text = {
   readonly acceptLanguage: string;
 
   /** renderDomainCatalog, after the root CLAUDE.md for the classifier and the root chat. */
-  readonly catalog: { readonly heading: string; readonly folder: string; readonly definition: string };
+  readonly catalog: {
+    readonly heading: string;
+    readonly folder: string;
+    readonly definition: string;
+    /** After the catalog for the classifier, when the root CLAUDE.md's routing rules name none of these domains: ones added in the app. */
+    unnamed(domains: readonly string[]): string;
+  };
   /** renderPageTypes, after a domain's CLAUDE.md for ingest and domain chat. */
   readonly pageTypes: { readonly heading: string; readonly example: string; readonly contents: string };
 

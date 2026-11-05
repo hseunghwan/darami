@@ -106,8 +106,16 @@ export const classifierText = (m: Memo, t: Text): string =>
     .filter(Boolean)
     .join('\n\n');
 
-/** The root CLAUDE.md as written, with no `@` inlining as in dotoriwiki, then the domain catalog. */
-export const classifierInstructions = (rootClaude: string, config: WikiConfig, t: Text): string => `${rootClaude}\n\n${renderDomainCatalog(config, t)}`;
+/**
+ * The root CLAUDE.md as written, with no `@` inlining as in dotoriwiki, then the domain catalog. A
+ * domain the root's routing rules never name as `name`, such as one added in the app, gets a line
+ * after the catalog: the rules end in a catch-all, which would otherwise take its memos.
+ */
+export function classifierInstructions(rootClaude: string, config: WikiConfig, t: Text): string {
+  const root = rootClaude.normalize('NFC');
+  const unnamed = [...config.domains.keys()].filter((d) => !root.includes(`\`${d}\``));
+  return [rootClaude, renderDomainCatalog(config, t), ...(unnamed.length ? [t.catalog.unnamed(unnamed)] : [])].join('\n\n');
+}
 
 /** The enum is the declared domains, so the list is never kept by hand. */
 export function classifySchema(domains: readonly DomainName[]): { readonly name: string; readonly schema: Record<string, unknown> } {

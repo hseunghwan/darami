@@ -16,7 +16,13 @@ export const en: Text = {
   collation: 'en',
   acceptLanguage: 'en,*;q=0.5',
 
-  catalog: { heading: '## Domains', folder: 'Folder', definition: 'What belongs here' },
+  catalog: {
+    heading: '## Domains',
+    folder: 'Folder',
+    definition: 'What belongs here',
+    unnamed: (domains) =>
+      `The routing rules above were written before ${domains.map(c).join(', ')} ${domains.length === 1 ? 'was' : 'were'} added. Before you settle on the rule for a memo nothing fits, check whether the memo fits ${domains.length === 1 ? 'that domain' : 'one of them'} by its definition in the table.`,
+  },
   pageTypes: { heading: '## Page types', example: 'Example file', contents: 'What a page holds' },
 
   context: (project, branch) => `Written while working in project ${project}${branch ? `, branch ${branch}` : ''}`,

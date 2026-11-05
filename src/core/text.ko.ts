@@ -16,7 +16,13 @@ export const ko: Text = {
   collation: 'ko',
   acceptLanguage: 'ko,en;q=0.8',
 
-  catalog: { heading: '## 도메인 목록', folder: '폴더', definition: '한 줄 정의' },
+  catalog: {
+    heading: '## 도메인 목록',
+    folder: '폴더',
+    definition: '한 줄 정의',
+    unnamed: (domains) =>
+      `위의 라우팅 기준은 ${domains.map(c).join(', ')} 도메인이 생기기 전에 쓰였다. 어디에도 확실하지 않을 때의 기준을 따르기 전에, 메모가 표의 정의로 ${domains.length === 1 ? '그 도메인에' : '그중 한 도메인에'} 맞는지 먼저 본다.`,
+  },
   pageTypes: { heading: '## 페이지 종류', example: '예시 파일', contents: '내용' },
 
   context: (project, branch) => `작성 맥락: 프로젝트 ${project}${branch ? `, 브랜치 ${branch}` : ''}`,
