@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TimeZone } from '../config';
-import { appliedPages, classifierText, committedPages, dayIn, failureOf, failureOutcome, MAX_ATTEMPTS, parseClassification, withReviewNote } from '../filing';
+import { parseWikiConfig, renderDomainCatalog, type TimeZone, type WikiConfig } from '../config';
+import { appliedPages, classifierInstructions, classifierText, committedPages, dayIn, failureOf, failureOutcome, MAX_ATTEMPTS, parseClassification, withReviewNote } from '../filing';
 import type { Change } from '../pages';
 import { textFor } from '../text';
 import type { DomainName } from '../types';
@@ -77,4 +77,36 @@ test('a commit\'s pages come in the applied line\'s order, each created or modif
     { pathUnderWiki: 'new.md', change: 'created', type: 'concept' },
   ]);
   assert.deepEqual(committedPages(스터디, changes, contents).map((p) => p.pathUnderWiki), appliedPages(스터디, changes));
+});
+
+test('the classifier gets one more line only when the root CLAUDE.md never names a declared domain, and it names exactly those', () => {
+  const presets = join(__dirname, '..', '..', '..', 'presets');
+  const machine = { modelProfiles: new Set<string>() };
+  const read = (l: string, f: string) => readFileSync(join(presets, l, f), 'utf8');
+  const configOf = (text: string): WikiConfig => {
+    const r = parseWikiConfig(text, machine);
+    assert.ok(r.ok);
+    return r.config;
+  };
+  const added = (yaml: string, ...names: string[]) => configOf(yaml.replace('domains:\n', `domains:\n${names.map((n) => `  ${n}:\n    description: ${n}\n    page_types:\n      x:\n        description: x\n`).join('')}`));
+
+  for (const l of ['ko', 'en'] as const) {
+    const root = read(l, 'CLAUDE.md');
+    const t = textFor(l);
+    const preset = configOf(read(l, 'dotoriwiki.yaml'));
+    assert.equal(classifierInstructions(root, preset, t), `${root}\n\n${renderDomainCatalog(preset, t)}`, `${l}: the preset prompt is unchanged`);
+
+    for (const names of [['recipes'], ['recipes', 'travel']]) {
+      const config = added(read(l, 'dotoriwiki.yaml'), ...names);
+      const out = classifierInstructions(root, config, t);
+      const head = `${root}\n\n${renderDomainCatalog(config, t)}\n\n`;
+      assert.ok(out.startsWith(head), `${l}: the root and the catalog come first`);
+      const line = out.slice(head.length);
+      assert.ok(!line.includes('\n'), `${l}: one line`);
+      assert.deepEqual(line.match(/`[^`]+`/g), names.map((n) => `\`${n}\``), `${l}: it names ${names.join(', ')} and nothing else`);
+    }
+  }
+  const nfd = read('ko', 'CLAUDE.md').normalize('NFD');
+  const ko = configOf(read('ko', 'dotoriwiki.yaml'));
+  assert.equal(classifierInstructions(nfd, ko, textFor('ko')), `${nfd}\n\n${renderDomainCatalog(ko, textFor('ko'))}`, 'a root CLAUDE.md saved in NFD still names its domains');
 });
