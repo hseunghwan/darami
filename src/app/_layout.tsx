@@ -31,6 +31,9 @@ export default function RootLayout() {
         <Stack.Screen name="memo/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="chats" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="page" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="domains/index" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="domains/edit" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="domains/fallback" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
         <Stack.Screen name="move/[id]" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
         <Stack.Screen name="model/[role]" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
         <Stack.Screen name="compose" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />

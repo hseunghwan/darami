@@ -3,11 +3,12 @@ import * as Network from 'expo-network';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import type { ChatId } from './core/chat';
-import type { MachineFacts } from './core/config';
+import type { MachineFacts, WikiConfig } from './core/config';
+import type { RootEntry } from './core/config-edit';
 import { FolderUnreachable } from './core/fs';
 import { parseMemo, type PageRef } from './core/pages';
 import type { ChatTarget, DomainName, MemoId } from './core/types';
-import { inspectFolder, setUpWiki, type ConfigIntent, type FolderState } from './core/wiki';
+import { inspectFolder, rootEntryFor, setUpWiki, type ConfigIntent, type FolderState } from './core/wiki';
 import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
@@ -28,7 +29,7 @@ import { isUsable, type Candidate, type Usable } from './lib/folder';
 import { loginOf, type Login } from './lib/login';
 import type { Released } from './lib/memos';
 import {
-  openEngine, type ChatProgress, type ChatSummary, type ChatView, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type PageView, type PhotoRefusal, type Question, type ReleaseResult, type TurnRef,
+  openEngine, type ChatProgress, type ChatSummary, type ChatView, type ConfigEdit, type ConfigEditResult, type Engine, type EngineEvent, type MemoBook, type MemoDetail, type PageView, type PhotoRefusal, type Question, type ReleaseResult, type TurnRef,
 } from './jobs/engine';
 import { createRunner, type Pause, type RunnerReport } from './jobs/runner';
 import { sqliteBook, sqliteChats, sqliteJournal } from './jobs/sqlite';
@@ -205,6 +206,49 @@ async function usableEngine(): Promise<Engine | null> {
 export function useDomains(): readonly DomainName[] {
   const domains = useApp((a) => (a.folder?.state?.kind === 'wiki' ? a.folder.state.config.domains : null));
   return useMemo(() => (domains ? [...domains.keys()] : []), [domains]);
+}
+
+const wikiConfigOf = (a: App): WikiConfig | null => (a.folder?.state?.kind === 'wiki' ? a.folder.state.config : null);
+
+/** The kept wiki's config, or null while the folder is not a wiki: what the domain screens show and edit. */
+export const useWikiConfig = (): WikiConfig | null => useApp(wikiConfigOf);
+
+/** The config as the folder holds it now: a screen that reloads after another app changed it. */
+export async function freshWikiConfig(): Promise<WikiConfig | null> {
+  await recheckFolder();
+  return wikiConfigOf(app);
+}
+
+export type Edited =
+  | ConfigEditResult
+  | { readonly kind: 'no-wiki' }
+  | { readonly kind: 'unreachable' }
+  /** The folder threw part way. Saving again finishes or refuses it. */
+  | { readonly kind: 'failed'; readonly message: string };
+
+/**
+ * One change to the wiki's domains, saved by the engine against dotoriwiki.yaml as it is now. The
+ * folder is inspected again after, so every screen shows the file as saved, and a pass runs, so
+ * memos for a new domain move.
+ */
+export async function editDomains(edit: ConfigEdit): Promise<Edited> {
+  const engine = await usableEngine().catch(() => null);
+  if (!engine) return { kind: 'no-wiki' };
+  try {
+    return await inFolderTurn(() => engine.editConfig(edit));
+  } catch (e) {
+    if (e instanceof FolderUnreachable) return { kind: 'unreachable' };
+    return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
+  } finally {
+    await recheckFolder();
+    void runner.trigger();
+  }
+}
+
+/** The kept folder's root entry a new domain's name would land on, for the form's note. null when there is none or the folder does not answer. */
+export async function rootEntry(name: string): Promise<RootEntry | null> {
+  const tree = app.folder?.tree;
+  return tree && name.trim() ? rootEntryFor(safFs(tree), name).catch(() => null) : null;
 }
 
 /** A 401 that a forced refresh did not cure, this launch: the login reads expired even while its tokens are stored. */
@@ -485,7 +529,18 @@ const configIntent = (tree: SafTree): ConfigIntent => {
   return { get: () => kv.get(key), set: (text) => kv.set(key, text), clear: () => kv.remove(key) };
 };
 
-const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale, configIntent(tree));
+/**
+ * Inspections and domain edits, one at a time. An inspection finishes a config write a kill cut
+ * off, so one running beside a write still going would finish or forget that write too early.
+ */
+let folderTurn: Promise<unknown> = Promise.resolve();
+function inFolderTurn<T>(fn: () => Promise<T>): Promise<T> {
+  const run = folderTurn.then(fn, fn);
+  folderTurn = run.catch(() => undefined);
+  return run;
+}
+
+const inspect = (tree: SafTree) => inFolderTurn(() => inspectFolder(safFs(tree), MACHINE, locale, configIntent(tree)));
 
 /** The picker, opened at the kept folder or Documents, and what it returned. null when cancelled. Keeps nothing. */
 export async function pickFolder(): Promise<Candidate | null> {
@@ -497,7 +552,7 @@ export async function pickFolder(): Promise<Candidate | null> {
 
 /** Writes or finishes the preset (setUpWiki refuses any other folder) and answers the new state. Keeps nothing. */
 export function setUpFolder(tree: SafTree): Promise<FolderState> {
-  return setUpWiki(safFs(tree), { locale, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, machine: MACHINE, intent: configIntent(tree) });
+  return inFolderTurn(() => setUpWiki(safFs(tree), { locale, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, machine: MACHINE, intent: configIntent(tree) }));
 }
 
 export const checkFolder = inspect;
