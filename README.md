@@ -12,22 +12,22 @@
   <a href="README.ko.md">한국어</a>
 </p>
 
-You write things down in a hurry and never sort them. darami sorts them for you.
+darami is an Android app that organizes notes, shared links, and photos into a Markdown wiki. It uses your ChatGPT account to classify each memo and update the relevant wiki pages.
 
-Type a line, share a link, or take a photo on your Android phone. darami asks ChatGPT, signed in with your own account, where the memo belongs, and files it into a Markdown wiki in a folder on your phone. Open the same folder in Obsidian, or sync it with Syncthing. No server, no computer.
+The wiki lives in a folder on your phone. You can open it in Obsidian or sync it with Syncthing. No separate server or computer is needed.
 
 ## How it works
 
-1. **Capture.** Write a memo, or share text, links, and photos from any app.
-2. **File.** darami picks the domain, such as journal, learning, someday, or one you add, and updates that domain's pages. It reads the articles your links point to, and records when and where each photo was taken.
-3. **Ask.** Ask your wiki a question. The answer cites the pages it read, and you can save it back as a page.
+1. **Capture:** Write a memo or share text, links, and photos from another app.
+2. **Organize:** darami files the memo under a domain, such as journal, learning, someday, or one you add, and updates its pages. It reads linked articles and records photo timestamps and locations.
+3. **Ask:** Ask a question about your wiki. Answers cite the pages used, and you can save an answer as a wiki page.
 
-## Why darami
+## Files and settings
 
-- **Your files.** The wiki is plain Markdown in a folder you pick. darami has no server and no account of its own.
-- **Your ChatGPT plan.** darami runs on the subscription you already have. Pick the model and effort for filing and for questions in Settings.
-- **Nothing gets lost.** A memo is in the folder before the text box clears. A filing that breaks the wiki's rules is undone and tried again.
-- **Your structure.** Add domains and change their page types in Settings. darami rewrites only the lines you changed in `dotoriwiki.yaml`.
+- The wiki is stored as Markdown files in a folder you choose. darami has no server or separate account.
+- It uses your existing ChatGPT subscription. In Settings, you can choose the model and reasoning effort for organizing memos and answering questions separately.
+- Each memo is saved to the folder before the text box clears. If an update violates the wiki's rules, darami rolls it back and retries.
+- You can add domains and change page types in Settings. Only the lines you change are rewritten in `dotoriwiki.yaml`.
 
 ## Get started
 
@@ -46,7 +46,7 @@ Then write your first memo. The [guide](docs/guide.md) covers the rest.
 
 ## Built on dotoriwiki
 
-darami grew out of [dotoriwiki](https://github.com/hseunghwan/dotoriwiki), which does the same job on a gateway on your computer. Both use the same wiki format, so each opens the other's wiki as it is. The name is 다람이, Korean for a little squirrel.
+darami is based on [dotoriwiki](https://github.com/hseunghwan/dotoriwiki), which organizes memos through a gateway on your computer. Both apps use the same wiki format and can open each other's wikis. The name 다람이 refers to a little squirrel in Korean.
 
 ## Build from source
 
