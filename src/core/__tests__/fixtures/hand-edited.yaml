@@ -1,0 +1,37 @@
+# top comment
+version: 1
+locale: en   # inline comment on locale
+time_zone: "America/Chicago"
+fallback_domain: 'journal'
+
+domains:
+    # the journal domain, keep first
+    journal:
+        description: "My days, quoted: with a colon"
+        model_profile: deep
+        page_types: { me: { description: How I tend to act, example: Me.md }, theme: {description: A recurring thought} }
+
+    learning:   # trailing comment on key
+        description: What I learned by doing it myself
+        agents_may_read: true
+        page_types:
+            concept:
+                description: One idea
+                example: RAG.md     # the canonical one
+            # a comment above case
+            case:
+                description: A situation
+            2026:
+                description: An integer-like key that must stay in place
+    someday:
+        description: >-
+            Things to watch or read later, folded
+        page_types:
+            item:
+                description: One thing to do later
+    # comment after the last domain, inside domains
+
+feeds:
+    geeknews:
+        domain: learning
+# document end comment
