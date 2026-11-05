@@ -1,6 +1,12 @@
-# 다람이 (darami)
+<p align="center">
+  <img src="docs/assets/logo.svg" width="112" height="112" alt="다람이">
+</p>
 
-[English](README.md)
+<h1 align="center">다람이 (darami)</h1>
+
+<p align="center">
+  <a href="README.md">English</a>
+</p>
 
 **안드로이드 폰에 한 줄 적으면, 다람이가 폰 안의 내 위키에 정리합니다.**
 

@@ -369,11 +369,11 @@ export const en: Copy = {
     updated: (day) => `Updated ${day}`,
     photo: (name) => `Photo: ${name}`,
   },
-  acorn: {
+  mark: {
     story:
       'A squirrel buries acorns anywhere, without much thought. It digs them up in winter, and the ones it forgets grow into oak trees. This app is for the lines you bury in a hurry: they come back when you need them, and the ones you forget may grow someday.',
-    storyLabel: 'The acorn story',
+    storyLabel: 'The squirrel story',
     tapToClose: 'Tap to close',
-    label: 'Acorn',
+    label: 'Squirrel',
   },
 };

@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, t
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FailureSentence } from '../lib/failure';
 import type { Tone } from '../lib/memos';
-import { TitleMark } from './acorn-mark';
+import { TitleMark } from './title-mark';
 import { Icon, type IconName } from './icon';
 import { useTheme, type Theme } from './theme';
 import { copy } from '../text';

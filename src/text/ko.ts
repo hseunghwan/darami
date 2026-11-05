@@ -381,11 +381,11 @@ export const ko = {
     updated: (day: string) => `${day} 수정`,
     photo: (name: string) => `사진: ${name}`,
   },
-  acorn: {
+  mark: {
     story:
       '다람쥐는 도토리를 아무 데나 대충 묻어요. 겨울엔 꺼내 먹고, 잊어버린 도토리는 참나무 숲이 돼요. 막 묻어 둔 한 줄을 필요할 때 꺼내 쓰고, 잊은 것도 언젠가 자라는 앱이에요.',
-    storyLabel: '도토리 이야기',
+    storyLabel: '다람쥐 이야기',
     tapToClose: '누르면 닫혀요',
-    label: '도토리',
+    label: '다람쥐',
   },
 };

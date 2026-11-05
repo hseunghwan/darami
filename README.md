@@ -1,6 +1,12 @@
-# darami
+<p align="center">
+  <img src="docs/assets/logo.svg" width="112" height="112" alt="darami">
+</p>
 
-[한국어](README.ko.md)
+<h1 align="center">darami</h1>
+
+<p align="center">
+  <a href="README.ko.md">한국어</a>
+</p>
 
 **Jot a line on your Android phone. darami files it into your own wiki, on the phone.**
 

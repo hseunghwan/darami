@@ -3,10 +3,10 @@ import { Modal, Pressable, StyleSheet, useWindowDimensions, View, type LayoutCha
 import Animated, { Easing, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 import { addTap } from '../lib/taps';
-import { ACORN, ACORN_LINE_COLOR, ACORN_STROKE_WIDTH, ACORN_TILE_COLOR, ACORN_TILE_RADIUS, ACORN_VIEWBOX, pathLength, type AcornStroke } from './acorn';
+import { MARK, MARK_LINE_COLOR, MARK_STROKE_WIDTH, MARK_TILE_COLOR, MARK_TILE_RADIUS, MARK_VIEWBOX, pathLength, type MarkStroke } from './mark';
 import { copy } from '../text';
 
-const STORY = copy.acorn.story;
+const STORY = copy.mark.story;
 
 // Android breaks Korean between any two syllables and React Native has no keep-all, so word
 // joiners hold each word together and lines break only at spaces, as the design does.
@@ -24,7 +24,7 @@ const overshoot = Easing.bezierFn(0.2, 0.9, 0.3, 1.25);
 
 // react-native-svg ignores pathLength on Android, so the dash runs over each stroke's real length.
 // The margin covers what sampling the curves leaves out.
-const LENGTHS = new Map(ACORN.map((s) => [s.name, pathLength(s.d) + 0.5]));
+const LENGTHS = new Map(MARK.map((s) => [s.name, pathLength(s.d) + 0.5]));
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -35,7 +35,7 @@ function phase(t: number, step: { at: number; ms: number }, easing: (x: number) 
 
 function Tile({ size, children }: { size: number; children: ReactNode }) {
   return (
-    <View style={[st.tile, { width: size, height: size, borderRadius: size * ACORN_TILE_RADIUS }]}>{children}</View>
+    <View style={[st.tile, { width: size, height: size, borderRadius: size * MARK_TILE_RADIUS }]}>{children}</View>
   );
 }
 
@@ -44,21 +44,21 @@ function Glyph({ size, children }: { size: number; children?: ReactNode }) {
     <Svg
       width={size}
       height={size}
-      viewBox={`0 0 ${ACORN_VIEWBOX} ${ACORN_VIEWBOX}`}
+      viewBox={`0 0 ${MARK_VIEWBOX} ${MARK_VIEWBOX}`}
       fill="none"
-      stroke={ACORN_LINE_COLOR}
-      strokeWidth={ACORN_STROKE_WIDTH}
+      stroke={MARK_LINE_COLOR}
+      strokeWidth={MARK_STROKE_WIDTH}
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {children ?? ACORN.map((s) => <Path key={s.name} d={s.d} strokeWidth={s.width} />)}
+      {children ?? MARK.map((s) => <Path key={s.name} d={s.d} strokeWidth={s.width} />)}
     </Svg>
   );
 }
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-function DrawnStroke({ stroke, clock }: { stroke: AcornStroke; clock: SharedValue<number> }) {
+function DrawnStroke({ stroke, clock }: { stroke: MarkStroke; clock: SharedValue<number> }) {
   const length = LENGTHS.get(stroke.name)!;
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: length * (1 - phase(clock.value, stroke.draw, easeOut)),
@@ -68,7 +68,7 @@ function DrawnStroke({ stroke, clock }: { stroke: AcornStroke; clock: SharedValu
 }
 
 /** The easter egg: the title icon grows to the middle of the screen, draws itself, and says what the app is for. */
-function AcornStory({ from, onClose }: { from: Rect; onClose: () => void }) {
+function MarkStory({ from, onClose }: { from: Rect; onClose: () => void }) {
   const clock = useSharedValue(0);
   const origin = useSharedValue({ dx: 0, dy: 0, scale: 0 });
   const started = useRef(false);
@@ -101,14 +101,14 @@ function AcornStory({ from, onClose }: { from: Rect; onClose: () => void }) {
 
   return (
     <Modal transparent statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={onClose}>
-      <Pressable accessibilityLabel={copy.acorn.storyLabel} accessibilityHint={copy.acorn.tapToClose} onPress={onClose} style={StyleSheet.absoluteFill}>
+      <Pressable accessibilityLabel={copy.mark.storyLabel} accessibilityHint={copy.mark.tapToClose} onPress={onClose} style={StyleSheet.absoluteFill}>
         <Animated.View style={[StyleSheet.absoluteFill, st.scrim, scrimStyle]} />
         {/* Sized to the window, not the modal, so a keyboard hiding underneath cannot move the tile mid-zoom. */}
         <View style={[st.story, { width: screen.width, height: screen.height }]} pointerEvents="none">
           <Animated.View onLayout={start} style={tileStyle}>
             <Tile size={STORY_TILE}>
               <Glyph size={STORY_GLYPH}>
-                {ACORN.map((s) => (
+                {MARK.map((s) => (
                   <DrawnStroke key={s.name} stroke={s} clock={clock} />
                 ))}
               </Glyph>
@@ -123,7 +123,7 @@ function AcornStory({ from, onClose }: { from: Rect; onClose: () => void }) {
   );
 }
 
-/** The app icon beside a tab title. Three taps within a second open the acorn story. */
+/** The app icon beside a tab title. Three taps within a second open the squirrel story. */
 export function TitleMark() {
   const ref = useRef<ComponentRef<typeof View>>(null);
   const taps = useRef<number[]>([]);
@@ -137,18 +137,18 @@ export function TitleMark() {
 
   return (
     <>
-      <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={copy.acorn.label} onPress={onPress} hitSlop={8}>
+      <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={copy.mark.label} onPress={onPress} hitSlop={8}>
         <Tile size={28}>
           <Glyph size={20} />
         </Tile>
       </Pressable>
-      {from && <AcornStory from={from} onClose={() => setFrom(null)} />}
+      {from && <MarkStory from={from} onClose={() => setFrom(null)} />}
     </>
   );
 }
 
 const st = StyleSheet.create({
-  tile: { backgroundColor: ACORN_TILE_COLOR, alignItems: 'center', justifyContent: 'center' },
+  tile: { backgroundColor: MARK_TILE_COLOR, alignItems: 'center', justifyContent: 'center' },
   scrim: { backgroundColor: 'rgba(0,0,0,0.72)' },
   story: { position: 'absolute', top: 0, left: 0, alignItems: 'center', justifyContent: 'center', gap: 28, paddingHorizontal: 36 },
   caption: { color: '#dadada', fontSize: 15, lineHeight: 25.5, textAlign: 'center' },
