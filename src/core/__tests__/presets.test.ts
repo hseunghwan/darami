@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { parseWikiPath, type WikiPath } from '../layout';
-import { presetFiles, unfinishedPreset, withZone } from '../presets';
+import { parseWikiPath, paths, resolvePath, type WikiPath } from '../layout';
+import type { DomainName } from '../types';
+import { newDomainSchema, presetFiles, unfinishedPreset, withZone } from '../presets';
 import { PRESET_SOURCE } from '../presets.gen';
 
 const PRESETS = join(__dirname, '..', '..', '..', 'presets');
@@ -59,4 +60,18 @@ test('unfinishedPreset names the preset whose root names a cut-off copy fits, pr
   assert.equal(unfinishedPreset(['journal', 'dotoriwiki.yaml'], 'ko'), 'en');
   assert.equal(unfinishedPreset(['스터디', 'journal'], 'ko'), null);
   assert.equal(unfinishedPreset(['notes.md'], 'ko'), null);
+});
+
+test('every preset domain CLAUDE.md opens as a CLAUDE.md made in the app does: title, the common rules line, the purpose heading', () => {
+  for (const locale of ['ko', 'en'] as const) {
+    const domains = Object.entries(PRESET_SOURCE[locale]).filter(([p]) => /^[^_/][^/]*\/CLAUDE\.md$/.test(p));
+    assert.equal(domains.length, 3, locale);
+    for (const [path, text] of domains) {
+      const name = path.split('/')[0]! as DomainName;
+      const made = newDomainSchema(locale, name, 'DESCRIPTION');
+      assert.ok(text.startsWith(made.slice(0, made.indexOf('DESCRIPTION'))), `${locale}/${path}`);
+      const include = made.split('\n')[2]!;
+      assert.ok(resolvePath(paths.domain(name), include.slice(1))! in PRESET_SOURCE[locale], `${locale}: ${include} names a file the preset has`);
+    }
+  }
 });
