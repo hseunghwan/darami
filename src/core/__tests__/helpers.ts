@@ -1,6 +1,7 @@
-/** The pure helpers of dotoriwiki test/helpers.ts at 91f0aac. Not a test file: testMatch takes *.test.ts only. */
+/** The pure helpers of dotoriwiki test/helpers.ts at 91f0aac, and darami's own fakes. Not a test file: testMatch takes *.test.ts only. */
 
 import { parseMemo, type NewMemo } from '../pages';
+import type { ConfigIntent } from '../wiki';
 
 export function page(fields: Record<string, unknown>, body = '본문.\n'): string {
   const fm = Object.entries(fields).map(([k, v]) => `${k}: ${Array.isArray(v) ? `[${v.join(', ')}]` : v}`);
@@ -17,4 +18,15 @@ export function memo(n: number, text = `메모 ${n}`, extra: Record<string, unkn
   const r = parseMemo({ id: ulid(n), text, captured_at: `2026-10-29T08:${String(n % 60).padStart(2, '0')}:00+09:00`, tz: 'Asia/Seoul', source: 'typed', ...extra });
   if (!r.ok) throw new Error(r.detail);
   return r.value;
+}
+
+/** The ConfigIntent in memory. One object outlives a kill, as the phone's kv does. */
+export function memoryIntent(): ConfigIntent & { held(): string | null } {
+  let text: string | null = null;
+  return {
+    get: async () => text,
+    set: async (t) => void (text = t),
+    clear: async () => void (text = null),
+    held: () => text,
+  };
 }

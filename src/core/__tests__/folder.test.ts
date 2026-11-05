@@ -6,11 +6,13 @@ import { nodeFs } from '../../fs/node';
 import type { Fs } from '../fs';
 import { presetFiles } from '../presets';
 import { inspectFolder, setUpWiki, type FolderState } from '../wiki';
+import { memoryIntent } from './helpers';
 
 const PRESETS = join(__dirname, '..', '..', '..', 'presets');
 const MADE = join(__dirname, 'fixtures', 'made-by-dotoriwiki');
 const machine = { modelProfiles: new Set<string>() };
-const setUp = { locale: 'ko', zone: 'GMT', machine } as const;
+const intent = memoryIntent();
+const setUp = { locale: 'ko', zone: 'GMT', machine, intent } as const;
 const KO_DOMAINS = ['일상', '스터디', '미루기 아카이빙'];
 
 const temp = () => mkdtempSync(join(tmpdir(), 'darami-folder-'));
@@ -57,12 +59,12 @@ function dyingAfter(fs: Fs, k: number, leave: 'nothing' | 'empty'): Fs {
 
 test('a folder with nothing, or only dot names, is empty', async () => {
   const root = temp();
-  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko'), { kind: 'empty' });
+  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko', intent), { kind: 'empty' });
   mkdirSync(join(root, '.stfolder'));
   mkdirSync(join(root, '.obsidian'));
   mkdirSync(join(root, '.trash'));
   writeFileSync(join(root, '.gitignore'), 'x\n');
-  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko'), { kind: 'empty' });
+  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko', intent), { kind: 'empty' });
 });
 
 test('setUpWiki writes the ko preset byte for byte, with .gitignore and the zone, and answers its domains', async () => {
@@ -93,7 +95,7 @@ test('a copy killed after any number of files, or between making a file and writ
     for (let k = 0; k < total; k++) {
       const root = temp();
       await assert.rejects(setUpWiki(dyingAfter(nodeFs(root), k, leave), setUp), /killed/);
-      const cut = await inspectFolder(nodeFs(root), machine, 'ko');
+      const cut = await inspectFolder(nodeFs(root), machine, 'ko', intent);
       // Only .gitignore, written first, can be there with nothing visible.
       const expected = snapshot(root).every((l) => l.startsWith('.gitignore:')) ? { kind: 'empty' } : { kind: 'unfinished', locale: 'ko' };
       assert.deepEqual(cut, expected, `${leave} after ${k}`);
@@ -116,7 +118,7 @@ test('a wiki dotoriwiki made reads as a wiki with its domains and one warning, a
   const root = temp();
   cpSync(MADE, root, { recursive: true });
   const before = snapshot(root);
-  const state = await inspectFolder(nodeFs(root), machine, 'ko');
+  const state = await inspectFolder(nodeFs(root), machine, 'ko', intent);
   assert.deepEqual(domainsOf(state), KO_DOMAINS);
   assert.ok(state.kind === 'wiki');
   assert.deepEqual(state.warnings.map((w) => w.key), ['domains.스터디.model_profile']);
@@ -128,7 +130,7 @@ test('a config that does not parse, or a missing CLAUDE.md, reads as broken with
   const yaml = temp();
   cpSync(join(PRESETS, 'ko'), yaml, { recursive: true });
   writeFileSync(join(yaml, 'dotoriwiki.yaml'), 'version: 1\nlocale: [ko\n');
-  const bad = await inspectFolder(nodeFs(yaml), machine, 'ko');
+  const bad = await inspectFolder(nodeFs(yaml), machine, 'ko', intent);
   assert.deepEqual(bad.kind === 'broken' && bad.problems.map((p) => p.key), ['dotoriwiki.yaml']);
   const schema = temp();
   cpSync(join(PRESETS, 'ko'), schema, { recursive: true });
@@ -150,7 +152,7 @@ test('a folder of other files reads as foreign, showing at most three names, and
 
 test('a folder that is gone reads as unreachable, and setUpWiki makes nothing', async () => {
   const root = join(temp(), 'wiki');
-  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko'), { kind: 'unreachable' });
+  assert.deepEqual(await inspectFolder(nodeFs(root), machine, 'ko', intent), { kind: 'unreachable' });
   assert.deepEqual(await setUpWiki(nodeFs(root), setUp), { kind: 'unreachable' });
   assert.deepEqual([...readdirSync(join(root, '..'))], []);
 });
