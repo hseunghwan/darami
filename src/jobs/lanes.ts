@@ -20,3 +20,34 @@ export function lanes<K>(): (key: K) => Lane {
     return l;
   };
 }
+
+/**
+ * Many readers or one writer. A writer waits for the reads in flight and holds new ones until it
+ * ends; writers go in the order they came. Meant for one file read or write, never a model turn.
+ */
+export function gate(): { readonly read: Lane; readonly write: Lane } {
+  let writers = 0;
+  let tail: Promise<unknown> = Promise.resolve();
+  const reads = new Set<Promise<unknown>>();
+  return {
+    async read(fn) {
+      while (writers > 0) await tail;
+      const run = fn();
+      reads.add(run);
+      try {
+        return await run;
+      } finally {
+        reads.delete(run);
+      }
+    },
+    write(fn) {
+      writers += 1;
+      const run = tail
+        .then(() => Promise.allSettled([...reads]))
+        .then(fn)
+        .finally(() => void (writers -= 1));
+      tail = run.catch(() => undefined);
+      return run;
+    },
+  };
+}

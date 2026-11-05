@@ -9,6 +9,8 @@ import type { JpegSpec, PhotoTools } from '../../core/photos';
 import type { FetchedSource, FetchSource, LinkResult } from '../../core/sources';
 import type { WikiPath } from '../../core/layout';
 import { presetFiles } from '../../core/presets';
+import type { ConfigIntent } from '../../core/wiki';
+import { memoryIntent } from '../../core/__tests__/helpers';
 import type { DomainName, Locale } from '../../core/types';
 import { nodeFs } from '../../fs/node';
 import type { Model } from '../../agent/model';
@@ -329,7 +331,7 @@ export function fakeFetchSource(answer: (url: string) => FetchedSource | 'offlin
 export const fixtureFetch = () =>
   fakeFetchSource((url) => (url.includes('dead') ? { kind: 'article', status: 'failed', title: null, detail: 'HTTP 404' } : { kind: 'article', status: 'ok', title: `제목 ${url}`, text: `본문 ${url}` }));
 
-export type Ports = { readonly photos?: PhotoTools; readonly fetchSource?: FetchSource; readonly now?: () => Date };
+export type Ports = { readonly photos?: PhotoTools; readonly fetchSource?: FetchSource; readonly now?: () => Date; readonly configIntent?: ConfigIntent };
 
 /** The engine on a folder and a store, as the phone opens it, on the fixture's clock. */
 export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: EngineEvent[] = [], book: BookStore = memoryBook(), chats: ChatStore = memoryChats(), ports: Ports = {}): Promise<Engine> =>
@@ -337,6 +339,7 @@ export const engineOn = (fs: Fs, store: JournalStore, model: Model, events: Engi
     fs, journal: store, book, chats, model, machine: { modelProfiles: MODEL_PROFILES }, now: ports.now ?? FIXTURE_NOW, onEvent: (e) => events.push(e),
     photos: ports.photos ?? copyingTools(),
     fetchSource: ports.fetchSource ?? fixtureFetch(),
+    configIntent: ports.configIntent ?? memoryIntent(),
   });
 
 /** The next book a watcher hears that `ok` accepts, or this one. Reading memo files the book has not seen needs a watcher. */

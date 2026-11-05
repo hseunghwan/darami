@@ -7,7 +7,7 @@ import type { MachineFacts } from './core/config';
 import { FolderUnreachable } from './core/fs';
 import { parseMemo, type PageRef } from './core/pages';
 import type { ChatTarget, DomainName, MemoId } from './core/types';
-import { inspectFolder, setUpWiki, type FolderState } from './core/wiki';
+import { inspectFolder, setUpWiki, type ConfigIntent, type FolderState } from './core/wiki';
 import { parseWikiPath, paths } from './core/layout';
 import { phoneModel } from './agent/codex';
 import { phonePhotoTools } from './media/phone';
@@ -175,6 +175,7 @@ function engineFor(folder: Folder | null): Promise<Engine> | null {
       onEvent: note,
       photos: phonePhotoTools,
       fetchSource: phoneFetchSource,
+      configIntent: configIntent(folder.tree),
     });
     const mine = { uri: folder.tree.uri, engine, unwatch: () => {} };
     opened = mine;
@@ -478,7 +479,13 @@ export function usePage(ref: PageRef): PageState {
   return state;
 }
 
-const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale);
+/** The folder's ConfigIntent in kv, which lives on the phone, so Syncthing never sees it. */
+const configIntent = (tree: SafTree): ConfigIntent => {
+  const key = `config.write:${tree.uri}`;
+  return { get: () => kv.get(key), set: (text) => kv.set(key, text), clear: () => kv.remove(key) };
+};
+
+const inspect = (tree: SafTree) => inspectFolder(safFs(tree), MACHINE, locale, configIntent(tree));
 
 /** The picker, opened at the kept folder or Documents, and what it returned. null when cancelled. Keeps nothing. */
 export async function pickFolder(): Promise<Candidate | null> {
@@ -490,7 +497,7 @@ export async function pickFolder(): Promise<Candidate | null> {
 
 /** Writes or finishes the preset (setUpWiki refuses any other folder) and answers the new state. Keeps nothing. */
 export function setUpFolder(tree: SafTree): Promise<FolderState> {
-  return setUpWiki(safFs(tree), { locale, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, machine: MACHINE });
+  return setUpWiki(safFs(tree), { locale, zone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, machine: MACHINE, intent: configIntent(tree) });
 }
 
 export const checkFolder = inspect;

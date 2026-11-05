@@ -111,6 +111,13 @@ test('only jobs/transaction.ts writes or removes a log.md', () => {
   assert.deepEqual(writers, [join('jobs', 'transaction.ts')]);
 });
 
+test('only core/wiki.ts writes dotoriwiki.yaml, under its intent', () => {
+  const all = sources(SRC);
+  assert.ok(all.some((s) => name(s.path) === join('core', 'wiki.ts')), 'the scan sees the folder reader');
+  const writers = all.filter((s) => /\.write\(\s*paths\.config\b/.test(s.text)).map((s) => name(s.path));
+  assert.deepEqual(writers, [join('core', 'wiki.ts')]);
+});
+
 test('outside src/jobs, only the engine, the runner, and the SQLite store are imported', () => {
   const jobs = join(SRC, 'jobs');
   const open = new Set(['engine', 'runner', 'sqlite'].map((f) => join(jobs, f)));

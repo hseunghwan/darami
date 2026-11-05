@@ -7,13 +7,17 @@
  * is paused, and the caller shows the problems. The next read after a fix resumes.
  */
 
-import { parseWikiConfig, type ConfigParse, type ConfigProblem, type MachineFacts, type WikiConfig } from './config';
+import { addedName, applyEdit, folded, type ConfigEdit, type EditRefusal, type RootEntry } from './config-edit';
+import { CONFIG_FILE, parseWikiConfig, type ConfigParse, type ConfigProblem, type MachineFacts, type WikiConfig } from './config';
 import { FolderUnreachable, type Fs } from './fs';
-import { paths, resolvePath, ROOT, type WikiPath } from './layout';
+import { parseWikiPath, paths, resolvePath, ROOT, type WikiPath } from './layout';
 import { parseLedger, type Ledger } from './ledger';
 import { memoIdsIn, type Places } from './places';
 import { presetFiles, unfinishedPreset } from './presets';
 import type { DomainName, Locale } from './types';
+
+/** The config rule's answer for a folder with no dotoriwiki.yaml at all. */
+export const NO_CONFIG: Extract<ConfigParse, { readonly ok: false }> = { ok: false, problems: [{ key: CONFIG_FILE, problem: 'does not exist', fix: 'restore it, or pick the wiki folder again' }] };
 
 /** null when the folder has no dotoriwiki.yaml. A missing CLAUDE.md is one of the problems. */
 export async function readConfig(fs: Fs, machine: MachineFacts): Promise<ConfigParse | null> {
@@ -71,13 +75,14 @@ export type FolderState =
   | { readonly kind: 'foreign'; readonly names: readonly string[] }
   | { readonly kind: 'unreachable' };
 
-export type SetUp = { readonly locale: Locale; readonly zone: string | undefined; readonly machine: MachineFacts };
+export type SetUp = { readonly locale: Locale; readonly zone: string | undefined; readonly machine: MachineFacts; readonly intent: ConfigIntent };
 
 const FOREIGN_SHOWN = 3;
 
-/** `preferred` picks the locale when a cut-off copy fits both presets. */
-export async function inspectFolder(fs: Fs, machine: MachineFacts, preferred: Locale): Promise<FolderState> {
+/** `preferred` picks the locale when a cut-off copy fits both presets. A config write a kill cut off is settled first. */
+export async function inspectFolder(fs: Fs, machine: MachineFacts, preferred: Locale, intent: ConfigIntent): Promise<FolderState> {
   try {
+    await settleConfigWrite(fs, intent);
     const visible = (await fs.list(ROOT)).filter((n) => !n.startsWith('.'));
     if (visible.length === 0) return { kind: 'empty' };
     const text = await fs.readText(paths.config);
@@ -103,7 +108,7 @@ export async function inspectFolder(fs: Fs, machine: MachineFacts, preferred: Lo
  * write can leave a prefix that a rerun keeps; for dotoriwiki.yaml that reads as broken.
  */
 export async function setUpWiki(fs: Fs, setUp: SetUp): Promise<FolderState> {
-  const before = await inspectFolder(fs, setUp.machine, setUp.locale);
+  const before = await inspectFolder(fs, setUp.machine, setUp.locale, setUp.intent);
   const locale = before.kind === 'empty' ? setUp.locale : before.kind === 'unfinished' ? before.locale : null;
   if (locale === null) return before;
   try {
@@ -113,7 +118,85 @@ export async function setUpWiki(fs: Fs, setUp: SetUp): Promise<FolderState> {
     if (e instanceof FolderUnreachable) return { kind: 'unreachable' };
     throw e;
   }
-  return inspectFolder(fs, setUp.machine, setUp.locale);
+  return inspectFolder(fs, setUp.machine, setUp.locale, setUp.intent);
+}
+
+/**
+ * The config text being written, held outside the folder until the write ends: Fs.write truncates
+ * and then writes, so a kill between the two would leave dotoriwiki.yaml cut short, and Syncthing
+ * would carry it on. kv on the phone (SQLite, synchronous FULL), memory under jest. One per folder.
+ */
+export type ConfigIntent = {
+  get(): Promise<string | null>;
+  set(text: string): Promise<void>;
+  clear(): Promise<void>;
+};
+
+export type ConfigEditResult =
+  | { readonly kind: 'saved'; readonly config: WikiConfig }
+  | { readonly kind: 'same'; readonly config: WikiConfig }
+  | { readonly kind: 'refused'; readonly refusal: EditRefusal };
+
+/**
+ * One domain edit against the folder as it is now (config-edit.ts says what it may change). Writes
+ * nothing on same or refused. Otherwise a new domain's CLAUDE.md is made first, so the yaml never
+ * names a domain without one, and dotoriwiki.yaml is written last under the intent. Throws
+ * FolderUnreachable as every Fs call does.
+ */
+export async function saveConfigEdit(fs: Fs, intent: ConfigIntent, machine: MachineFacts, edit: ConfigEdit): Promise<ConfigEditResult> {
+  const text = await fs.readText(paths.config);
+  if (text === null) return { kind: 'refused', refusal: { kind: 'broken', problems: NO_CONFIG.problems } };
+  const now = await withSchemas(fs, parseWikiConfig(text, machine));
+  if (!now.ok) return { kind: 'refused', refusal: { kind: 'broken', problems: now.problems } };
+  const r = applyEdit(text, edit, { machine, sameNameAtRoot: edit.kind === 'add' ? await rootEntryFor(fs, edit.name) : null });
+  if (r.kind !== 'changed') return r;
+  if (r.schema) {
+    const path = paths.domainSchema(r.schema.name);
+    // A create a kill cut off leaves a prefix of the text; any other text is the user's and stays.
+    if ((await fs.create(path, r.schema.text)) === 'exists' && cutOff(await fs.readBytes(path), r.schema.text)) await fs.write(path, r.schema.text);
+  }
+  await intent.set(r.text);
+  await fs.write(paths.config, r.text);
+  await intent.clear();
+  return { kind: 'saved', config: r.config };
+}
+
+/** The root entry a new domain's name would land on once case and Unicode form are folded, as Android's storage compares names. */
+export async function rootEntryFor(fs: Fs, typed: string): Promise<RootEntry | null> {
+  const name = folded(addedName(typed));
+  const hit = (await fs.list(ROOT)).find((n) => folded(n) === name);
+  if (hit === undefined) return null;
+  const path = parseWikiPath(hit);
+  const folder =
+    path !== null &&
+    (await fs.list(path).then(
+      () => true,
+      (e: unknown) => {
+        if (e instanceof FolderUnreachable) throw e;
+        return false;
+      },
+    ));
+  return { name: hit, folder };
+}
+
+/**
+ * Finishes or forgets a config write a kill cut off:
+ *   no intent                                              nothing
+ *   the file is empty or a strict prefix of the            the write was cut: finish it
+ *   intended text's bytes (a cut can split a character)
+ *   anything else, a missing file included                 it ended, or another app wrote since
+ * and then the intent goes. A kill inside this leaves a prefix again, which the next inspect settles.
+ */
+async function settleConfigWrite(fs: Fs, intent: ConfigIntent): Promise<void> {
+  const intended = await intent.get();
+  if (intended === null) return;
+  if (cutOff(await fs.readBytes(paths.config), intended)) await fs.write(paths.config, intended);
+  await intent.clear();
+}
+
+function cutOff(bytes: Uint8Array | null, text: string): boolean {
+  const whole = new TextEncoder().encode(text);
+  return bytes !== null && bytes.length < whole.length && bytes.every((b, i) => b === whole[i]);
 }
 
 /** <d>/wiki/log.md parsed; a missing file is an empty ledger. */

@@ -18,7 +18,7 @@
  *   ledger(d) inside transaction.ts: every log.md write and every recovery in d. Short.
  */
 
-import { CONFIG_FILE, type ConfigParse, type ConfigProblem, type MachineFacts } from '../core/config';
+import type { ConfigParse, ConfigProblem, MachineFacts } from '../core/config';
 import { dayIn } from '../core/filing';
 import type { Fs } from '../core/fs';
 import type { VerdictId } from '../core/ledger';
@@ -28,13 +28,14 @@ import type { FetchSource } from '../core/sources';
 import type { Located } from '../core/places';
 import { textFor } from '../core/text';
 import type { DomainName, MemoId } from '../core/types';
-import { readConfig, readPlaces } from '../core/wiki';
+import type { ConfigEdit } from '../core/config-edit';
+import { NO_CONFIG, readConfig, readPlaces, saveConfigEdit, type ConfigEditResult, type ConfigIntent } from '../core/wiki';
 import { LIMITS, type AgentLimits, type ChatLimits } from '../agent/loop';
 import type { Model, Unavailable } from '../agent/model';
 import { openBook, type Book, type BookParts, type BookStore, type Pass } from './book';
 import { chatService, type Chats, type ChatStore, type PageView, type TurnRef } from './chat';
 import { domainJobs, type SaveResult } from './domain';
-import { lane, lanes, type Lane } from './lanes';
+import { gate, lane, lanes, type Lane } from './lanes';
 import { memoTransitions } from './memos';
 import { photoFiles, type PendingPhotos, type PhotoFiles, type PhotoRefusal } from './photos';
 import { openJournal, type Journal, type JournalStore, type Recovered, type Words } from './transaction';
@@ -42,6 +43,8 @@ import { openJournal, type Journal, type JournalStore, type Recovered, type Word
 export type { Book, BookStore, ChangedPage, CommitRecord, FailedRow, HeldRow, MemoBook, MemoDetail, MemoHeader, MemoRow, Pass } from './book';
 export type { AnsweredTurn, AskResult, AskTrace, ChatFailure, ChatStore, ChatSummary, ChatTurn, ChatView, FailedTurn, PageView, Question, TurnRef } from './chat';
 export type { SaveRefusal, SaveResult } from './domain';
+export type { ConfigEdit, DomainDraft, DraftProblem, EditRefusal } from '../core/config-edit';
+export type { ConfigEditResult } from '../core/wiki';
 export type { ChatProgress } from '../agent/loop';
 export type { AnswerPlacement } from '../core/places';
 export type { Finished, Placement } from '../core/places';
@@ -124,6 +127,13 @@ export type Engine = {
    * inbox/answers/<d>/<id>.md; the job writes the page and the ledger line.
    */
   saveAnswer(turn: TurnRef): Promise<SaveResult>;
+  /**
+   * One change to the domains in dotoriwiki.yaml, against the file as it is now. Every config read
+   * in this engine (routing, jobs, ledger lines, chats) waits while the file is written, so none
+   * sees it cut short. A running job keeps the config it read when it started, as it does for an
+   * edit made in Obsidian.
+   */
+  editConfig(edit: ConfigEdit): Promise<ConfigEditResult>;
 };
 
 export type EngineDeps = {
@@ -143,6 +153,8 @@ export type EngineDeps = {
   readonly photos: PhotoTools;
   /** articleFetcher(…) on the phone, fakeFetchSource(…) under jest. */
   readonly fetchSource: FetchSource;
+  /** The folder's ConfigIntent, the same one the app's inspectFolder settles: kv on the phone, memoryIntent() under jest. */
+  readonly configIntent: ConfigIntent;
 };
 
 /** What memos.ts and domain.ts share. `fs` is the book's, so every read and write reaches the book. */
@@ -165,8 +177,6 @@ export type Ctx = {
   readonly fetchSource: FetchSource;
 };
 
-const NO_CONFIG: ConfigParse = { ok: false, problems: [{ key: CONFIG_FILE, problem: 'does not exist', fix: 'restore it, or pick the wiki folder again' }] };
-
 /**
  * Opens the engine, settles every stale journal row it can, and gives each declared domain the
  * log.md and index.md it lacks. Open one engine per folder per
@@ -175,8 +185,9 @@ const NO_CONFIG: ConfigParse = { ok: false, problems: [{ key: CONFIG_FILE, probl
  */
 export async function openEngine(deps: EngineDeps): Promise<Engine> {
   const book = await openBook({ fs: deps.fs, journal: deps.journal, store: deps.book, now: deps.now });
+  const configGate = gate();
   const config = async () => {
-    const c = (await readConfig(book.fs, deps.machine)) ?? NO_CONFIG;
+    const c = (await configGate.read(() => readConfig(book.fs, deps.machine))) ?? NO_CONFIG;
     book.sawConfig(c);
     return c;
   };
@@ -241,6 +252,12 @@ export async function openEngine(deps: EngineDeps): Promise<Engine> {
     async saveAnswer(turn) {
       const f = await chat.filing(turn);
       return 'id' in f ? jobs.stageAnswer(f) : { kind: 'refused', reason: f };
+    },
+    async editConfig(edit) {
+      const r = await configGate.write(() => saveConfigEdit(book.fs, deps.configIntent, deps.machine, edit));
+      // The memo book learns the new domain list now, not at the next pass.
+      if (r.kind === 'saved') await config();
+      return r;
     },
   };
 }
