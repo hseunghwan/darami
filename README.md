@@ -100,6 +100,20 @@ Tap a row to change it. The sheet lists **Default (gpt-6-luna)** and the models 
 
 darami asks ChatGPT for the list each time Settings opens and keeps the last one, so the sheet works offline. A pick applies from the next model call. When the account cannot use the model, the badge reads `ChatGPT isn't answering` and darami tries again in 10 minutes, or at once when you pick another model. The **Filing** pick wins over a `model_profile` in `dotoriwiki.yaml`.
 
+## Change domains
+
+In Settings, under **Wiki folder**, tap **Change domains**. The list shows each domain with its description, and the domain where unsure memos go.
+
+- Tap a domain to change its description or its page types. Add a type, change a type's description or example, or remove a type, then tap **Save** to write them together. A type's name cannot change once saved, and a domain keeps at least one type.
+- Tap **Add a domain** to make one. Give it a folder name, a one-line description, and at least one page type. darami writes the domain's `CLAUDE.md` with the common rules and your description, then adds the domain to `dotoriwiki.yaml`. If the wiki already has a folder with exactly that name, darami uses it and keeps its files and its `CLAUDE.md`.
+- Tap **Unsure memos** to pick the domain a memo goes to when the classifier cannot choose.
+
+The classifier routes by each domain's description. The routing rules in the root `CLAUDE.md` name only the domains they were written for, so darami tells the classifier which domains those rules leave out, and asks it to check them before it falls back to the rule for memos that fit nowhere.
+
+darami applies a change to `dotoriwiki.yaml` as the file is when you tap **Save**. It rewrites only the lines of the change, and keeps your comments, key order, indent, and the keys it does not use. A change you made in Obsidian to another domain stays. If the same domain changed since you opened it, darami saves nothing and offers **Reload**. If the app is killed while it writes `dotoriwiki.yaml`, darami finishes that write the next time it reads the folder, so the file is never left half written.
+
+To rename or delete a domain, or to change what its `CLAUDE.md` says, edit the files yourself, as [Edit pages in Obsidian](#edit-pages-in-obsidian) describes.
+
 ## The wiki folder
 
 ```
@@ -120,13 +134,13 @@ _originals/           photos as the phone sent them, EXIF and GPS included
 _attachments/         copies of at most 2048 px that pages embed as ![[<id>-1.jpg]]
 ```
 
-darami writes the memo files, the photo files, `index.md`, and `log.md`. The model writes pages only under the memo's own `<domain>/wiki/`. It may only add lines to the end of `_review.md`, and it has no tool to delete a file. After darami writes the starter wiki, it never writes `dotoriwiki.yaml`, a `CLAUDE.md`, or `_schema/`. It skips every name that starts with a dot. There is no git. Each domain's `log.md` is the record.
+darami writes the memo files, the photo files, `index.md`, and `log.md`. The model writes pages only under the memo's own `<domain>/wiki/`. It may only add lines to the end of `_review.md`, and it has no tool to delete a file. After darami writes the starter wiki, it writes `dotoriwiki.yaml` only when you change domains in Settings, and then only the lines of that change. It writes a `CLAUDE.md` only for a domain you add there, and never changes one you wrote or anything in `_schema/`. It skips every name that starts with a dot. There is no git. Each domain's `log.md` is the record.
 
 ### Edit pages in Obsidian
 
 Open the folder as an Obsidian vault and edit any page. darami reads pages from the folder for every job and every question, so it works from your edits. If a page changes while a job is working on it, the model has to read the page again before it can write it. Keep each page's frontmatter (`type`, `summary`, `aliases`, `status`, `sources`, `updated`), because `index.md` is built from it.
 
-To change the domains or page types, edit `dotoriwiki.yaml`. darami reads it on every pass, so a saved change applies without a restart. To add a domain, add an entry under `domains` and make a folder of the same name with a `CLAUDE.md` that says what the domain is for. A mistake in the file pauses filing while memos keep arriving. **Change folder** in Settings lists each problem with its fix, and **Check again** reads the file again.
+You can also edit `dotoriwiki.yaml` and the `CLAUDE.md` files yourself. That is the way to rename or delete a domain, or to change what a domain's `CLAUDE.md` tells the model. To rename a domain, rename its folder and its key under `domains` together. darami reads the file on every pass, so a saved change applies without a restart. A mistake in the file pauses filing while memos keep arriving. **Change folder** in Settings lists each problem with its fix, and **Check again** reads the file again.
 
 ### Sync with Syncthing
 
