@@ -49,6 +49,7 @@ const ARGS: Record<string, unknown[][]> = {
   'detail.confirm': [['learning']],
   'settings.loginExpired': [['me@example.com'], [null]],
   'settings.waiting': [[1], [3]],
+  'settings.getUpdate': [['v0.2.0']],
   'models.default': [['gpt-6-luna']],
   'models.picked': [['gpt-6-sol', 'high']],
   'models.effortTitle': [['gpt-6-sol']],
